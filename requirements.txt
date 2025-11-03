@@ -1,0 +1,46 @@
+pyaudio
+
+# Wake Word Engine (Choose one path)
+pvporcupine
+
+# -- OR --
+# openwakeword
+# onnxruntime
+
+# Speech-to-Text (STT) Engine
+vosk
+
+# Natural Language Understanding (NLU) / Parsing
+number-parser
+
+# API Client & Utilities
+dhanhq
+pandas
+requests
+
+# Voice Recognition & Audio
+pvporcupine==3.0.2
+pyaudio==0.2.14
+
+# Google Cloud Services
+google-generativeai==0.8.3
+google-cloud-speech==2.27.0
+
+# Text-to-Speech
+elevenlabs==1.9.0
+
+# Audio Processing (for ElevenLabs playback without mpv)
+pydub==0.25.1
+
+# Trading API
+dhanhq==1.5.2
+
+# Data Processing
+pandas==2.2.3
+
+# Utilities
+python-dotenv==1.0.1
+pytz==2024.1
+
+# Optional: If you prefer to use simpleaudio instead of pydub
+# simpleaudio==1.0.4

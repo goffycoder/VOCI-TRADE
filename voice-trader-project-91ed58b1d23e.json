@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "voice-trader-project",
+  "private_key_id": "91ed58b1d23e64774ff4578c9ca72b9806148bfc",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC/sZ9s+EBmmLAC\nLGOLHZXTKYF8VI4cna/x/Vxrdh4gB3KozsygcbWzcjFrtsrmNrogehWYo1U46F7q\nbRK+RNhWVPGGqILbpmT2nB8U9N5YvsRIPcrVU98MJfOlJeYF7zSwD4zSkcHBJakO\nKs74zXzCEYhiSZgK2etFTNsqs5Q7twpm5iJTF1//8W4B0q6HMTF/M4Hrz0/roB9P\nlswqJhvD0u+28zzODR5UPnFCGKIvHj107MHkF2VMU00Br6GsnhJI3QkgmiyZPRra\nt1nb6W86+4SXqTtTZRuEpN5ceU1y8Z0ZEOnq767vjTp9Ovcx5D8KZQ3H8QzmCDIJ\nbYLONeU5AgMBAAECggEAAQivAPssjb/c7E84g66CVoW5g/M5Ao+yfs2xIxasIt80\ntfHvSc4lfS9M1Cj3Rp9g8ZH6U5UH61FioG0QnzsjGhI7yekvIVIUuDyTBYMIIYoL\nECYW1dmKw3N9uzCP609JtX0HdqMUVfxpDcWMCfNZDj2cuLRXxRnqIqhVGbfPH/W1\netocwbCfezn+TMuKtCVRrH9oxv/X2wrV2yok8mAX4o44T8GDWl2wtYztiXUo0g9D\nngg7T/Mbxbe6mmJ4htzScM/cHJn1STv9s6hUlY/64mik2cqkuYBrL/irG3YGCTFu\n+eTa+U78E9s9a3svarQVyuSjrAKKUDjWgjB+bVY3yQKBgQDj+VHtcTav3SxHd2e4\nbE2VBDYWU2nLcgMj0OZQbR7Gtg14va8v0DoPelESQKJCC8IQzBVAiIZVgbx8MNBi\ns4jbFDplmqVmmSokcjtn1Xu44tX1DFkhxc10nsBKN0vL7K2KAQW+BiXGDtGdIoU6\nhr+aMjVSD1/p6/on+qz2yAPFpwKBgQDXQoPEWN/byt7BubXpCCfWiFBWfoiLlXrZ\nFuO4I//rlJbwDy0Rw1ZyLZkxrIivJVlhPP6PxG9Fe1eChGYGkjAEpKUEZ6hGaAot\nTxDd7++K5C3sIv7bbYm4yXrQGLImWaKg0Ih23mxHsoTtpP1DxmwpbmszIj6Q/wie\nirmN4KIaHwKBgQCeyt4PJsmxy7v496nuYrnTb0CBYo6RYBPh0bNrF+bVAJ/3lyA8\njKy0dT2dGhorKOd/Lbgr4Cy5yIlSc+nipi1QdBGNDh/hjBQ3mL3aQHBSQuZHLtey\n14WZkq5bw5JvM6dZNgca6ktLXq0Q56enMY6qSAit5PmpBW6UhF4P8xf1hwKBgCRj\nuzDLMXTPk96+DVGKrmlm++XTWDP4nh7q7q4nb9EcenO0rRLOqeN9b+Nk3mp1bumw\nTPxy4bimREHtLe44cmOmjbrz5w+X8Ph94EUUlbMuJdFAjUL8/oY9kURymFNBXeu/\ntQIbUcTBGhWuiZ4Wghxy7S5kwJz0cDmVDA8/BUhTAoGAMruTBmtcTtN3ciDUKpvi\np1EcX31FqwdcxpY5NOXW+RtFc5MQtUSZWmBSWxKtnNjucePihFvOJL0jfeOmM3Vu\nKtNmKcewjnGu0B05AYnpSnRt2gbmuWSMxJzUkVzTjz2u50ywNpQlmGpyVibjAHD5\nCOFzyoGBnY5tAz/Jh9O7+eI=\n-----END PRIVATE KEY-----\n",
+  "client_email": "voice-trader-sa@voice-trader-project.iam.gserviceaccount.com",
+  "client_id": "108661525702317351976",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/voice-trader-sa%40voice-trader-project.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

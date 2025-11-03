@@ -1,0 +1,15 @@
+# Environment file with API keys
+.env
+
+# Python virtual environment
+venv/
+
+# macOS system file
+.DS_Store
+
+# Compiled Python files
+__pycache__/
+*.pyc
+
+# Temporary audio file
+temp_command.wav
