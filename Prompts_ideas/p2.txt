@@ -1,0 +1,161 @@
+🧠 The Core Architectural Change: Intent Classification
+
+Right now, your bot assumes every command is an order. To make it conversational, you must first teach it to understand intent. Is the user placing a trade, or just asking a question?
+
+You'll need a new Gemini function, let's call it get_intent_gemini(transcription), that runs before get_order_intent_gemini.
+
+Its prompt would be:
+
+"You are an NLU system. Classify the user's intent as one of the following: 'PLACE_ORDER', 'GET_PORTFOLIO', 'GET_FUNDS', 'GET_LTP', 'CONVERT_POSITION', 'KILL_SWITCH'. User: 'How am I doing today?' -> 'GET_PORTFOLIO' User: 'What's the price of Reliance?' -> 'GET_LTP' User: 'Buy 10 Reliance.' -> 'PLACE_ORDER' User: 'Do I have enough money for 10 TCS?' -> 'GET_FUNDS' User: '{transcription}'"
+
+In main.py, your STATE_PROCESSING block will now look like this:
+
+transcription = transcribe_audio(...)
+
+intent = get_intent_gemini(transcription)
+
+if intent == 'PLACE_ORDER':
+
+Run all the logic you've already built (slot-filling, disambiguation, PIN check).
+
+elif intent == 'GET_PORTFOLIO':
+
+Call the new portfolio logic (see Phase 2).
+
+elif intent == 'GET_LTP':
+
+Call the new live price logic (see Phase 3).
+
+...and so on...
+
+🚀 A 5-Phase Development Plan
+
+Here is how I would recommend building these features.
+
+Phase 1: Pre-Trade Intelligence (The "Smart Order")
+
+Goal: Make the existing order flow smarter. APIs Used: POST /margincalculator, GET /fundlimit
+
+This is the most natural next step. Instead of just placing an order and hoping it goes through, the bot checks your funds first.
+
+Conversational Flow:
+
+You: "Buy 100 shares of TCS." (Bot internally finds securityId, then calls /margincalculator) Ledger: "Just a heads-up, that order for 100 shares of TCS will require 15,000 rupees. You have 25,000 available. Please provide the 4-digit PIN to confirm."
+
+-- OR --
+
+Ledger: "That order for 100 shares of TCS requires 15,000 rupees, but you only have 10,000 available. Please try a smaller quantity."
+
+How to Build It:
+
+dhan_handler.py:
+
+Add a function get_fund_limit() that calls GET /fundlimit and returns the availabelBalance.
+
+Add a function get_margin_for_order(order_details) that calls POST /margincalculator and returns totalMargin.
+
+main.py:
+
+In your STATE_PROCESSING block, just before the final "Request Confirmation PIN" step:
+
+Call get_fund_limit() and get_margin_for_order().
+
+Compare the two. If totalMargin > availabelBalance, speak the error message and reset. Otherwise, proceed to the PIN.
+
+Phase 2: Portfolio Awareness (The "What do I own?" Feature)
+
+Goal: Answer questions about your holdings and daily profit/loss. APIs Used: GET /holdings, GET /positions
+
+This is the most common query for any trader.
+
+Conversational Flow:
+
+You: "Hey Ledger, how's my portfolio today?" (Bot calls get_positions()) Ledger: "Looking good. You have 3 open positions for the day. Your total unrealized profit is 1,450 rupees. Your main gainer is Adani Green."
+
+You: "What are my long-term holdings?" (Bot calls get_holdings()) Ledger: "You have 4 holdings, including 50 shares of HDFC Bank and 100 shares of Amara Raja."
+
+How to Build It:
+
+dhan_handler.py:
+
+Add get_holdings() function (calls GET /holdings).
+
+Add get_positions() function (calls GET /positions).
+
+main.py:
+
+Implement the GET_PORTFOLIO intent from the architectural change.
+
+When this intent is triggered, call your new dhan_handler functions.
+
+Pro Tip: Don't just read the raw JSON. Summarize it. You can even pass the JSON response to another Gemini prompt like: "Summarize this portfolio data into a simple, one-sentence spoken update."
+
+Phase 3: Live Market Data (The "What's the price?" Feature)
+
+Goal: Get real-time prices for any stock. APIs Used: Live Market Feed (WebSocket)
+
+This makes your bot a true market companion. Note: As the docs show, this is a separate WebSocket subscription.
+
+Conversational Flow:
+
+You: "Hey Ledger, what's the price of Reliance?" (Bot uses stock_finder to get the security_id, then checks its live price data) Ledger: "Reliance is trading at 2,950 rupees, up 1.2% today."
+
+How to Build It:
+
+This is the most complex step. You'll need to create a new file, (e.g., market_feed.py) that runs in a separate thread.
+
+This thread will connect to the Dhan Market Feed WebSocket (e.g., wss://api-data.dhan.co) at the start of your program.
+
+It will subscribe to a list of popular stocks (or stocks in your portfolio).
+
+It will listen for price ticks and store them in a shared dictionary (e.g., live_prices = {'2885': 2950.00}).
+
+main.py:
+
+Implement the GET_LTP intent.
+
+When triggered, it will get the security_id from stock_finder and look up the price in that shared live_prices dictionary.
+
+Phase 4: Advanced Position Management
+
+Goal: Handle advanced commands like converting a position or activating the kill switch. APIs Used: POST /positions/convert, POST /killswitch
+
+Conversational Flow:
+
+You: "Switch my intraday Adani position to delivery." (Bot identifies the open 'INTRADAY' position for Adani and calls /positions/convert) Ledger: "Done. Your Adani Enterprises position is now marked for delivery."
+
+You: "Activate the kill switch." Ledger: "This will cancel all pending orders and block new trades for the day. Are you sure?" You: "Yes." Ledger: "Kill switch activated. Trading is now disabled."
+
+How to Build It:
+
+dhan_handler.py: Add convert_position(...) and activate_kill_switch() functions.
+
+main.py:
+
+Implement CONVERT_POSITION and KILL_SWITCH intents.
+
+For CONVERT_POSITION, you can make it extra smart: the NLU only needs to get symbol: 'Adani' and toProductType: 'CNC'. Your code can then automatically call get_positions() to find the security_id, fromProductType, and quantity to fill in the rest of the API request.
+
+Phase 5: Proactive Order Updates
+
+Goal: The bot tells you when your orders are executed without you asking. APIs Used: Live Order Update (WebSocket)
+
+This closes the loop on your trade.
+
+Conversational Flow:
+
+(You placed an order 5 minutes ago and are now silent, waiting for the wake word) [Ledger] (proactively): "Order update: Your BUY order for 7 shares of Adani Green has been fully executed." (The bot then goes back to listening for "Hey Ledger")
+
+How to Build It:
+
+This is another threaded task, similar to the market feed.
+
+Create a file (order_updater.py) to connect to wss://api-order-update.dhan.co.
+
+This thread listens for messages. When it gets a status update (like TRADED or REJECTED), it needs to tell the main main.py thread to speak.
+
+The simplest way is to use a queue. The update thread puts a message (e.g., "Your Adani order is complete") into a shared queue.
+
+Your main while True: loop in main.py will be modified to also check this queue on every cycle. If it finds a message, it will say_text(message) before listening for the wake word.
+
+I would recommend starting with Phase 1 and Phase 2, as they provide the most conversational value for the effort and build directly on your existing code.

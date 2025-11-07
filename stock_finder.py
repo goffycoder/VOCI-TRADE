@@ -1,8 +1,7 @@
 import pandas as pd
 import os
+from difflib import SequenceMatcher
 
-# *** IMPORTANT ***
-# Update this path to your NSE_EQ CSV file
 CSV_FILE_PATH = "/Users/vrajpatel/Desktop/SBU/HCI/voice-trader/NSE_ONLY_STOCKS.csv"
 
 class StockFinder:
@@ -12,62 +11,126 @@ class StockFinder:
         """
         if not os.path.exists(csv_path):
             print(f"[StockFinder]: FATAL ERROR - CSV file not found at: {csv_path}")
-            raise FileNotFoundError
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
             
         try:
             self.df = pd.read_csv(csv_path)
             
-            # --- We need two columns ---
+            # Validate required columns
+            required_columns = ['UNDERLYING_SYMBOL', 'SECURITY_ID']
+            missing_columns = [col for col in required_columns if col not in self.df.columns]
             
-            # 1. Full Company Name (e.g., "reliance industries ltd")
-            if 'UNDERLYING_SYMBOL' not in self.df.columns:
-                 print("[StockFinder]: FATAL ERROR - Your CSV must have an 'UNDERLYING_SYMBOL' column.")
-                 raise KeyError("Missing 'UNDERLYING_SYMBOL' column in CSV")
-            self.df['search_name'] = self.df['UNDERLYING_SYMBOL'].str.lower().str.replace(' limited', '').str.replace(' ltd', '').str.replace('.', '', regex=False)
+            if missing_columns:
+                print(f"[StockFinder]: FATAL ERROR - Missing required columns: {missing_columns}")
+                raise KeyError(f"Missing columns: {missing_columns}")
             
-            # 2. Security ID (e.g., "12345")
-            if 'SECURITY_ID' not in self.df.columns:
-                 print("[StockFinder]: FATAL ERROR - Your CSV must have a 'SECURITY_ID' column.")
-                 raise KeyError("Missing 'SECURITY_ID' column in CSV")
-
+            # Create normalized search column
+            self.df['search_name'] = (
+                self.df['UNDERLYING_SYMBOL']
+                .str.lower()
+                .str.replace(' limited', '', regex=False)
+                .str.replace(' ltd', '', regex=False)
+                .str.replace('.', '', regex=False)
+                .str.replace('-', ' ', regex=False)
+                .str.strip()
+            )
+            
+            # Create alternate search with common abbreviations
+            self.df['abbrev_name'] = (
+                self.df['search_name']
+                .str.replace('industries', 'ind', regex=False)
+                .str.replace('technologies', 'tech', regex=False)
+                .str.replace('limited', '', regex=False)
+            )
+            
             print(f"[StockFinder]: Loaded {len(self.df)} stocks from {csv_path}")
             
         except Exception as e:
             print(f"[StockFinder]: FATAL ERROR - Could not load or process CSV: {e}")
             raise
 
+    def _similarity_score(self, str1: str, str2: str) -> float:
+        """Calculate similarity ratio between two strings."""
+        return SequenceMatcher(None, str1, str2).ratio()
+
     def find_security_id(self, spoken_symbol: str) -> list[tuple[str, str]]:
         """
-        Finds all possible matches for a spoken symbol using only the full name.
+        Finds all possible matches for a spoken symbol.
         Returns a list of tuples: (security_id, full_name)
+        
+        Matching strategy:
+        1. Exact match on normalized name (highest priority)
+        2. Exact match on abbreviated name
+        3. All words present in name (partial match)
+        4. Fuzzy match (similarity > 0.7)
+        5. Single word match (last resort)
         """
         if not spoken_symbol:
+            print("[StockFinder]: Empty search term provided.")
             return []
             
         search_term = spoken_symbol.lower().strip()
+        search_words = search_term.split()
         
-        # --- We will find ALL matches using the name and return them ---
+        print(f"[StockFinder]: Searching for '{spoken_symbol}' (words: {search_words})")
         
-        # 1. Try for an exact match on the simplified Company Name
-        exact_name_match = self.df[self.df['search_name'] == search_term]
-        if not exact_name_match.empty:
-            # High confidence: user said the exact name. Return only this.
-            row = exact_name_match.iloc[0]
-            print(f"[StockFinder]: Found exact NAME match.")
+        # --- STRATEGY 1: Exact match on normalized name ---
+        exact_match = self.df[self.df['search_name'] == search_term]
+        if not exact_match.empty:
+            row = exact_match.iloc[0]
+            print(f"[StockFinder]: ✓ Found EXACT match: {row['UNDERLYING_SYMBOL']}")
             return [(str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])]
-
-        # 2. If no exact match, find all partial matches in the full name
-        partial_name_match = self.df[self.df['search_name'].str.contains(search_term, na=False)]
         
-        if partial_name_match.empty:
-            print(f"[StockFinder]: No match found for '{spoken_symbol}'.")
-            return []
-
-        # Convert the DataFrame to our list of tuples
-        matches = []
-        for _, row in partial_name_match.iterrows():
-            matches.append((str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL']))
+        # --- STRATEGY 2: Exact match on abbreviated name ---
+        abbrev_match = self.df[self.df['abbrev_name'] == search_term]
+        if not abbrev_match.empty:
+            row = abbrev_match.iloc[0]
+            print(f"[StockFinder]: ✓ Found ABBREVIATION match: {row['UNDERLYING_SYMBOL']}")
+            return [(str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])]
+        
+        # --- STRATEGY 3: All words present (order-independent) ---
+        if len(search_words) > 1:
+            mask = pd.Series([True] * len(self.df))
+            for word in search_words:
+                mask = mask & self.df['search_name'].str.contains(word, na=False, regex=False)
             
-        print(f"[StockFinder]: Found {len(matches)} potential matches for '{spoken_symbol}'.")
-        # Return up to 5 matches to avoid overwhelming the user
-        return matches[:5]
+            all_words_match = self.df[mask]
+            if not all_words_match.empty:
+                matches = [
+                    (str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])
+                    for _, row in all_words_match.iterrows()
+                ]
+                print(f"[StockFinder]: ✓ Found {len(matches)} ALL-WORDS matches")
+                return matches[:5]
+        
+        # --- STRATEGY 4: Fuzzy matching (similarity > 0.7) ---
+        print("[StockFinder]: Attempting fuzzy match...")
+        self.df['similarity'] = self.df['search_name'].apply(
+            lambda x: self._similarity_score(search_term, x)
+        )
+        
+        fuzzy_matches = self.df[self.df['similarity'] > 0.7].sort_values('similarity', ascending=False)
+        if not fuzzy_matches.empty:
+            matches = [
+                (str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])
+                for _, row in fuzzy_matches.head(5).iterrows()
+            ]
+            print(f"[StockFinder]: ✓ Found {len(matches)} FUZZY matches (similarity > 0.7)")
+            return matches
+        
+        # --- STRATEGY 5: Single word match (last resort) ---
+        if len(search_words) == 1:
+            single_word_match = self.df[
+                self.df['search_name'].str.contains(search_words[0], na=False, regex=False)
+            ]
+            if not single_word_match.empty:
+                matches = [
+                    (str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])
+                    for _, row in single_word_match.iterrows()
+                ]
+                print(f"[StockFinder]: ✓ Found {len(matches)} PARTIAL matches")
+                return matches[:5]
+        
+        # --- NO MATCH FOUND ---
+        print(f"[StockFinder]: ✗ No match found for '{spoken_symbol}'")
+        return []

@@ -1,0 +1,85 @@
+📁 The Refactoring Plan: From One File to Components
+
+Our goal is to give each file a Single Responsibility. main.py should be the "conductor" that manages the app's flow, not the "brain," "mouth," and "broker" all at once.
+
+Here is the new file structure I recommend:
+
+main.py (The Conductor):
+
+Responsibility: Runs the main while True: loop, manages the audio stream (Porcupine, PyAudio), and controls the app's state (e.g., current_state).
+
+It will call other services to do the actual work.
+
+dhan_handler.py (The Broker):
+
+Responsibility: (No change) All communication with the Dhan API. We will just add new functions here (like get_positions, get_fund_limit).
+
+stock_finder.py (The Database):
+
+Responsibility: (No change) All logic for searching your NSE_ONLY_STOCKS.csv file.
+
+speech_service.py (NEW - The "Mouth & Ears"):
+
+Responsibility: All speech-to-text and text-to-speech logic.
+
+We will move say_text(), record_audio(), and transcribe_audio() from main.py into this file.
+
+nlu_service.py (NEW - The "Brain"):
+
+Responsibility: All communication with the Gemini API.
+
+We will move get_order_intent_gemini() and fill_missing_slot_gemini() from main.py into this file.
+
+We'll also add our new intent classifier here.
+
+intent_handler.py (NEW - The "Manager"):
+
+Responsibility: This is the most important part. It will contain the logic for handling each command.
+
+The giant elif current_state == STATE_PROCESSING: block from main.py will be moved here.
+
+main.py will just call intent_handler.process_command(transcription).
+
+🚀 Our New Development Roadmap
+
+Here is the order I propose. Step 0 is our refactor.
+
+Step 0: Refactor the Code
+
+We will create the new files (speech_service.py, nlu_service.py, intent_handler.py) and move our existing, working code into them. After this, the app should work exactly as it does now, but the code will be clean.
+
+Step 1: Implement Pre-Trade Intelligence
+
+Goal: Make the existing order flow smarter.
+
+Feature: Before asking for the 4-digit PIN, the bot will call the POST /margincalculator and GET /fundlimit APIs.
+
+User Experience: "That order for 10 shares of Adani will require 15,000 rupees. You have 25,000 available. Please enter your PIN to confirm." or "Error: You only have 10,000 rupees available."
+
+Step 2: Implement Portfolio Awareness
+
+Goal: Add the first new conversational intents.
+
+Feature: Use the GET /holdings and GET /positions APIs.
+
+User Experience:
+
+You: "Hey Ledger, what's in my portfolio?"
+
+Ledger: "You have 3 open positions for the day, with an unrealized profit of 1,450 rupees. Your main holding is 10 shares of Adani Green."
+
+Step 3: Implement Advanced Management
+
+Goal: Add more complex "write" operations.
+
+Feature: Use POST /positions/convert and POST /killswitch.
+
+User Experience: "Hey Ledger, convert my intraday Adani position to delivery." or "Hey Ledger, activate the kill switch."
+
+Step 4: Implement Live Data (The "Future")
+
+Goal: Get real-time data.
+
+Feature: Use the Live Market Feed (WebSocket) to answer price queries. This is more complex as it requires multithreading or asynchronous code.
+
+User Experience: "Hey Ledger, what's the price of Reliance?"

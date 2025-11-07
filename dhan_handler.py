@@ -1,5 +1,5 @@
 from dhanhq import dhanhq
-from datetime import datetime
+import datetime
 import pytz # For time zone logic
 
 class DhanHandler:
@@ -11,20 +11,20 @@ class DhanHandler:
             self.dhan = dhanhq(client_id, access_token)
             print("[DhanHandler]: Dhan client initialized successfully.")
         except Exception as e:
-            print(f"[DhanHandler]: Error initializing Dhan client: {e}")
+            print(f"[DhanHandler]: FATAL ERROR - Could not initialize Dhan client: {e}")
             raise
 
-    def _is_market_open(self) -> bool:
+    def is_market_open(self) -> bool:
         """
         Checks if the Indian market (NSE/BSE) is open.
         This is time-zone aware.
         """
         try:
             tz = pytz.timezone('Asia/Kolkata')
-            now = datetime.now(tz)
+            now = datetime.datetime.now(tz)
             
             # Market days are Monday (0) to Friday (4)
-            if now.weekday() > 4:
+            if now.weekday() >= 5:
                 print("[DhanHandler]: Market is CLOSED (Weekend)")
                 return False
             
@@ -50,11 +50,13 @@ class DhanHandler:
 
         print(f"[DhanHandler]: Order failed. Code: {error_code}, Message: {error_message}")
 
-        
+        # Specific, known error codes
         if error_code == "DH-905":
             return "The order failed. The broker said the Security ID was invalid."
         if error_code == "DH-900":
             return "Authentication failed. The API token is invalid or expired."
+        
+        # All other errors (like DH-906) will just return the server message
         return f"Sorry, the order failed. The broker said: {error_message}"
 
     def place_voice_order(self, order_details: dict) -> str:
@@ -62,21 +64,29 @@ class DhanHandler:
         Takes a final, validated order dictionary and places it.
         """
         try:
-            is_open = self._is_market_open()
+            is_open = self.is_market_open()
             is_amo = not is_open
 
             print(f"[DhanHandler]: Placing order with details: {order_details}")
             
+            # --- THIS IS THE FIX ---
+            # Set price to 0.0 for MARKET orders, otherwise use the provided price
+            price = 0.0
+            if order_details["order_type"] == "LIMIT":
+                # Use .get() to safely handle None, though it should be a float
+                price = float(order_details.get("price", 0.0))
+            # --- END OF FIX ---
+            
             order_response = self.dhan.place_order(
                 security_id=order_details["security_id"],
-                exchange_segment="NSE_EQ", # Hardcoding NSE_EQ as requested
+                exchange_segment=order_details["exchange_segment"],
                 transaction_type=order_details["action"],
                 quantity=order_details["quantity"],
                 order_type=order_details["order_type"],
                 product_type="INTRADAY", # Hardcoded for safety
-                price=order_details["price"],
+                price=price,             # This will now be 0.0 for MARKET
                 validity="DAY",
-                after_market_order=is_amo # <-- NOW DYNAMIC
+                after_market_order=is_amo # <-- Correct AMO logic
             )
             
             print(f"[DhanHandler]: API Response: {order_response}")
