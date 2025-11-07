@@ -13,3 +13,10 @@ __pycache__/
 
 # Temporary audio file
 temp_command.wav
+
+# Google Cloud JSON key (if it's in your project folder)
+*.json
+
+# Python virtual environment
+venv/
+__pycache__/
