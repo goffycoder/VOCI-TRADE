@@ -1,114 +1,196 @@
 from dhanhq import dhanhq
 import datetime
-import pytz # For time zone logic
+import pytz
+import requests
+import json
 
 class DhanHandler:
     def __init__(self, client_id, access_token):
         """
         Initializes the Dhan API client.
         """
+        self.client_id = client_id
+        self.access_token = access_token
+        self.base_url = "https://api.dhan.co/v2"
+        
+        # Headers for raw API calls (based on your docs)
+        self.headers = {
+            "access-token": access_token,
+            "client-id": client_id,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
         try:
+            # Keep existing library for order placement if it works well
             self.dhan = dhanhq(client_id, access_token)
             print("[DhanHandler]: Dhan client initialized successfully.")
         except Exception as e:
             print(f"[DhanHandler]: FATAL ERROR - Could not initialize Dhan client: {e}")
             raise
 
+    # --- MARKET HOURS (Keep existing) ---
     def is_market_open(self) -> bool:
-        """
-        Checks if the Indian market (NSE/BSE) is open.
-        This is time-zone aware.
-        """
         try:
             tz = pytz.timezone('Asia/Kolkata')
             now = datetime.datetime.now(tz)
-            
-            # Market days are Monday (0) to Friday (4)
-            if now.weekday() >= 5:
-                print("[DhanHandler]: Market is CLOSED (Weekend)")
-                return False
-            
-            # Market hours are 9:15 AM to 3:30 PM IST
+            if now.weekday() >= 5: return False
             market_open = now.replace(hour=9, minute=15, second=0)
             market_close = now.replace(hour=15, minute=30, second=0)
+            return market_open <= now <= market_close
+        except:
+            return False
+
+    # --- PHASE 1: FUNDS ---
+    def get_funds(self):
+        """Fetches available trading balance."""
+        try:
+            url = f"{self.base_url}/fundlimit"
+            response = requests.get(url, headers=self.headers)
+            data = response.json()
             
-            if market_open <= now <= market_close:
-                print("[DhanHandler]: Market is OPEN")
-                return True
-            else:
-                print("[DhanHandler]: Market is CLOSED (Outside trading hours)")
-                return False
+            # Based on docs: "availabelBalance" (typo in their docs? we check both)
+            # Docs say: availabelBalance
+            balance = data.get("availabelBalance", data.get("availableBalance", 0.0))
+            return float(balance)
         except Exception as e:
-            print(f"[DhanHandler]: Error checking market hours: {e}")
-            return False # Default to 'closed' for safety
+            print(f"[DhanHandler]: Error fetching funds: {e}")
+            return None
 
-    def _handle_error_response(self, order_response: dict) -> str:
-        """Translates a failed API response into plain English."""
-        remarks = order_response.get('remarks', {})
-        error_code = remarks.get('error_code')
-        error_message = remarks.get('error_message', 'unknown error')
+    # --- PHASE 2: PORTFOLIO ---
+    def get_holdings_summary(self):
+        """Fetches long-term holdings summary."""
+        try:
+            url = f"{self.base_url}/holdings"
+            response = requests.get(url, headers=self.headers)
+            data = response.json()
+            
+            # Handle if Dhan wraps it in a "data" key or returns a list directly
+            holdings = data.get("data") if isinstance(data, dict) else data
 
-        print(f"[DhanHandler]: Order failed. Code: {error_code}, Message: {error_message}")
-
-        # Specific, known error codes
-        if error_code == "DH-905":
-            return "The order failed. The broker said the Security ID was invalid."
-        if error_code == "DH-900":
-            return "Authentication failed. The API token is invalid or expired."
+            if not holdings or len(holdings) == 0:
+                return "You have no long-term holdings."
+                
+            summary = []
+            for item in holdings[:5]: # Limit to top 5
+                symbol = item.get("tradingSymbol")
+                qty = item.get("totalQty")
+                summary.append(f"{qty} shares of {symbol}")
+            
+            text = ", ".join(summary)
+            return f"You are holding: {text}."
+        except Exception as e:
+            print(f"[DhanHandler]: Error fetching holdings: {e}")
+            return "I couldn't fetch your holdings."
         
-        # All other errors (like DH-906) will just return the server message
-        return f"Sorry, the order failed. The broker said: {error_message}"
+    def get_positions_summary(self):
+        """Fetches intraday open positions."""
+        try:
+            url = f"{self.base_url}/positions"
+            response = requests.get(url, headers=self.headers)
+            positions = response.json()
+            
+            total_pl = 0.0
+            open_positions = []
+            
+            for pos in positions:
+                # 'unrealizedProfit' is the current P&L for open positions
+                pl = pos.get("unrealizedProfit", 0.0)
+                total_pl += pl
+                if pos.get("netQty", 0) != 0:
+                    open_positions.append(f"{pos['tradingSymbol']} ({pl} rupees)")
+            
+            status = "profit" if total_pl >= 0 else "loss"
+            pos_text = ", ".join(open_positions) if open_positions else "no open positions"
+            
+            return f"Total intraday P&L is a {status} of {abs(total_pl):.2f} rupees. Active positions: {pos_text}."
+        
+        except Exception as e:
+            print(f"[DhanHandler]: Error fetching positions: {e}")
+            return "I couldn't fetch your positions."
 
-    def place_voice_order(self, order_details: dict) -> str:
+    # --- PHASE 3: LIVE MARKET DATA ---
+    def get_live_price(self, security_id, exchange_segment="NSE_EQ"):
         """
-        Takes a final, validated order dictionary and places it.
+        Fetches LTP (Last Traded Price) for a specific security.
+        Docs: POST /marketfeed/ltp
         """
         try:
+            url = f"{self.base_url}/marketfeed/ltp"
+            # Docs require specific payload structure
+            payload = {
+                exchange_segment: [int(security_id)]
+            }
+            
+            response = requests.post(url, headers=self.headers, json=payload)
+            data = response.json()
+            
+            # Structure: data -> data -> NSE_EQ -> "security_id" -> last_price
+            if data.get("status") == "success":
+                market_data = data.get("data", {}).get(exchange_segment, {})
+                instrument_data = market_data.get(str(security_id))
+                if instrument_data:
+                    return instrument_data.get("last_price")
+            return None
+        except Exception as e:
+            print(f"[DhanHandler]: Error fetching price: {e}")
+            return None
+
+    # --- ORDER PLACEMENT (Modified for Funds Check) ---
+    def place_voice_order(self, order_details: dict) -> str:
+        try:
+            # 1. Funds Check (if buying)
+            if order_details["action"] == "BUY":
+                funds = self.get_funds()
+                if funds is not None:
+                    # Estimate cost (Use provided price or fetch live price)
+                    price = order_details.get("price")
+                    if not price or price == 0.0:
+                        # If market order, fetch current price to estimate
+                        current_price = self.get_live_price(order_details["security_id"])
+                        price = current_price if current_price else 0.0
+                    
+                    estimated_cost = price * order_details["quantity"]
+                    if estimated_cost > funds:
+                        return f"Insufficient funds. You have {funds} rupees, but this trade requires approx {estimated_cost} rupees."
+
+            # 2. Existing Order Logic
             is_open = self.is_market_open()
             is_amo = not is_open
-
-            print(f"[DhanHandler]: Placing order with details: {order_details}")
             
-            # --- THIS IS THE FIX ---
-            # Set price to 0.0 for MARKET orders, otherwise use the provided price
-            price = 0.0
+            price_arg = 0.0
             if order_details["order_type"] == "LIMIT":
-                # Use .get() to safely handle None, though it should be a float
-                price = float(order_details.get("price", 0.0))
-            # --- END OF FIX ---
+                price_arg = float(order_details.get("price", 0.0))
+
+            print(f"[DhanHandler]: Placing Order: {order_details}")
             
+            # Use the existing library for placing orders (it's cleaner)
             order_response = self.dhan.place_order(
                 security_id=order_details["security_id"],
                 exchange_segment=order_details["exchange_segment"],
                 transaction_type=order_details["action"],
                 quantity=order_details["quantity"],
                 order_type=order_details["order_type"],
-                product_type="INTRADAY", # Hardcoded for safety
-                price=price,             # This will now be 0.0 for MARKET
+                product_type="INTRADAY",
+                price=price_arg,
                 validity="DAY",
-                after_market_order=is_amo # <-- Correct AMO logic
+                after_market_order=is_amo
             )
-            
-            print(f"[DhanHandler]: API Response: {order_response}")
 
-            if order_response and order_response.get('status') == 'failure':
-                return self._handle_error_response(order_response)
-
-            elif order_response and order_response.get('status') == 'success':
-                order_data = order_response.get('data', {})
-                order_status = order_data.get('orderStatus', 'UNKNOWN')
-                
-                if order_status in ("TRANSIT", "PENDING"):
-                    amo_msg = " as an after market order." if is_amo else "."
-                    symbol_name = order_details.get("symbol_name", order_details.get("symbol"))
-                    return (f"Your {order_details['action']} order for {order_details['quantity']} shares of "
-                            f"{symbol_name} is in transit{amo_msg}")
-                else:
-                    return f"Your order was successful, but the status is {order_status}."
-            
+            if order_response and order_response.get('status') == 'success':
+                # Dynamic Success Message
+                    if is_amo:
+                        return f"Market is closed. Order for {order_details['symbol_name']} placed as an After Market Order."
+                    else:
+                     return f"Order for {order_details['symbol_name']} executed successfully."
             else:
-                return "An unknown error occurred. The API response was not recognized."
+                 return self._handle_error_response(order_response)
 
         except Exception as e:
-            print(f"[DhanHandler]: An unexpected Python error occurred: {e}")
-            return f"A system error occurred. Please check the logs."
+            print(f"[DhanHandler]: Error: {e}")
+            return "There was a system error placing the order."
+
+    def _handle_error_response(self, order_response: dict) -> str:
+        remarks = order_response.get('remarks', {})
+        msg = remarks.get('error_message', 'Unknown error')
+        return f"The broker rejected the order: {msg}"

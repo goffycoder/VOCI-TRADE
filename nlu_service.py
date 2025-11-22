@@ -94,20 +94,25 @@ JSON OUTPUT:
         response_text = response.text if response else "No response"
         print(f"[NLU]: ✗ Error: {e} | Response: {response_text}")
         return None
+
 def get_general_intent(transcription: str) -> str:
     """
-    Classifies the user's intent into broad categories.
+    Classifies the user command.
     """
     prompt = f"""
     Classify the user command into ONE of these intents:
-    - MARKET_NEWS (asking for news, updates, what's happening)
-    - PLACE_ORDER (buying, selling stocks)
-    - GET_HOLDINGS (asking about portfolio, positions)
-    - UNKNOWN (anything else)
+    - MARKET_NEWS: Asking for news, what's happening.
+    - PLACE_ORDER: Buying or selling specific stocks.
+    - GET_HOLDINGS: Asking "what do I own", "my portfolio".
+    - GET_POSITIONS: Asking "my open positions", "my profit today", "intraday status".
+    - GET_FUNDS: Asking "my balance", "how much cash", "funds available".
+    - CHECK_PRICE: Asking "price of [stock]", "how is [stock] trading", "quote for [stock]".
+    - UNKNOWN: Anything else.
     
-    User: "What's the news on Reliance?" -> MARKET_NEWS
+    User: "What is the price of Reliance?" -> CHECK_PRICE
+    User: "How much money do I have?" -> GET_FUNDS
+    User: "What are my open positions?" -> GET_POSITIONS
     User: "Buy 10 Tata Steel" -> PLACE_ORDER
-    User: "How are my stocks doing?" -> GET_HOLDINGS
     User: "{transcription}"
     
     Intent:
@@ -115,10 +120,8 @@ def get_general_intent(transcription: str) -> str:
     try:
         response = gemini_model.generate_content(prompt)
         intent = response.text.strip().upper()
-        # Basic validation
-        if intent in ["MARKET_NEWS", "PLACE_ORDER", "GET_HOLDINGS", "UNKNOWN"]:
-            return intent
-        return "UNKNOWN"
+        valid_intents = ["MARKET_NEWS", "PLACE_ORDER", "GET_HOLDINGS", "GET_POSITIONS", "GET_FUNDS", "CHECK_PRICE", "UNKNOWN"]
+        return intent if intent in valid_intents else "UNKNOWN"
     except Exception:
         return "UNKNOWN"
 
