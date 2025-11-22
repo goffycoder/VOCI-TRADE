@@ -3,6 +3,7 @@
 
 # Python virtual environment
 venv/
+main_vtrade/
 
 # macOS system file
 .DS_Store
