@@ -24,10 +24,11 @@ def get_order_intent_gemini(transcription: str) -> dict | None:
     prompt = f"""
 You are an expert NLU system for a stock trading voice assistant.
 
-TASK: Extract trading order details from the user's spoken command.
+TASK: Extract trading order details, portfolio/price queries, or position management commands.
 
 OUTPUT FORMAT: Valid JSON object with these fields:
 {{
+  "intent": "ORDER" or "GET_PORTFOLIO" or "GET_PRICE" or "CONVERT_POSITION" or "KILL_SWITCH",
   "action": "BUY" or "SELL" or null,
   "quantity": integer or null,
   "symbol": "spoken stock name" or null,
@@ -36,28 +37,40 @@ OUTPUT FORMAT: Valid JSON object with these fields:
 }}
 
 RULES:
-1. "action": Extract only if user says "buy", "sell", "purchase", "acquire", "short", etc.
-2. "quantity": Extract numbers like "five", "100", "fifty shares", "10 units"
-3. "symbol": Extract company names like "reliance", "tata motors", "infosys"
+1. "intent": 
+   - "GET_PORTFOLIO": "what do I own", "show holdings", "my positions".
+   - "GET_PRICE": "what is the price of X", "current rate of X".
+   - "CONVERT_POSITION": "convert X to delivery", "change X to intraday".
+   - "KILL_SWITCH": "close everything", "square off all", "panic mode", "exit all".
+   - "ORDER": buy/sell/trade commands.
+2. "action": Extract only if user says "buy", "sell", "purchase", "acquire", "short", etc.
+3. "quantity": Extract numbers like "five", "100", "fifty shares", "10 units"
+4. "symbol": Extract company names like "reliance", "tata motors", "infosys"
    - Include partial names: "tata" is valid
    - Include abbreviations: "tcs" is valid
-4. "price": Extract if user mentions price: "at 1500", "for 2000 rupees"
-5. "order_type": 
+5. "price": Extract if user mentions price: "at 1500", "for 2000 rupees"
+6. "order_type": 
    - "LIMIT" if price is mentioned
    - "MARKET" if no price mentioned AND action is present
    - null if action is not present
-6. Set ANY field to null if not explicitly mentioned
-7. DO NOT guess or infer missing information
+7. Set ANY field to null if not explicitly mentioned
+8. DO NOT guess or infer missing information
 
 EXAMPLES:
 User: "buy 10 reliance"
-Output: {{"action": "BUY", "quantity": 10, "symbol": "reliance", "price": null, "order_type": "MARKET"}}
+Output: {{"intent": "ORDER", "action": "BUY", "quantity": 10, "symbol": "reliance", "price": null, "order_type": "MARKET"}}
 
-User: "I want to purchase tata motors"
-Output: {{"action": "BUY", "quantity": null, "symbol": "tata motors", "price": null, "order_type": null}}
+User: "what do I have in my portfolio"
+Output: {{"intent": "GET_PORTFOLIO", "action": null, "quantity": null, "symbol": null, "price": null, "order_type": null}}
 
-User: "sell 50 shares of infosys at 1500"
-Output: {{"action": "SELL", "quantity": 50, "symbol": "infosys", "price": 1500.0, "order_type": "LIMIT"}}
+User: "what is the price of tcs"
+Output: {{"intent": "GET_PRICE", "action": null, "quantity": null, "symbol": "tcs", "price": null, "order_type": null}}
+
+User: "convert 50 shares of sbi to delivery"
+Output: {{"intent": "CONVERT_POSITION", "action": null, "quantity": 50, "symbol": "sbi", "price": null, "order_type": null}}
+
+User: "close all my positions immediately"
+Output: {{"intent": "KILL_SWITCH", "action": null, "quantity": null, "symbol": null, "price": null, "order_type": null}}
 
 USER COMMAND: "{transcription}"
 
