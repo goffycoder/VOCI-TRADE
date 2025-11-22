@@ -1,0 +1,1112 @@
+I am having this existing code setup analyze what is left and what we have to do next and ask for inputs from my end , dont assume anything , ask for documentation from dhan api . I would give you current file status , what we wanna achieve [dhan_handler.py - from dhanhq import dhanhq
+import datetime
+import pytz # For time zone logic
+
+class DhanHandler:
+def init(self, client_id, access_token):
+"""
+Initializes the Dhan API client.
+"""
+try:
+self.dhan = dhanhq(client_id, access_token)
+print("[DhanHandler]: Dhan client initialized successfully.")
+except Exception as e:
+print(f"[DhanHandler]: FATAL ERROR - Could not initialize Dhan client: {e}")
+raise
+
+code
+Code
+def is_market_open(self) -> bool:
+    """
+    Checks if the Indian market (NSE/BSE) is open.
+    This is time-zone aware.
+    """
+    try:
+        tz = pytz.timezone('Asia/Kolkata')
+        now = datetime.datetime.now(tz)
+        
+        # Market days are Monday (0) to Friday (4)
+        if now.weekday() >= 5:
+            print("[DhanHandler]: Market is CLOSED (Weekend)")
+            return False
+        
+        # Market hours are 9:15 AM to 3:30 PM IST
+        market_open = now.replace(hour=9, minute=15, second=0)
+        market_close = now.replace(hour=15, minute=30, second=0)
+        
+        if market_open <= now <= market_close:
+            print("[DhanHandler]: Market is OPEN")
+            return True
+        else:
+            print("[DhanHandler]: Market is CLOSED (Outside trading hours)")
+            return False
+    except Exception as e:
+        print(f"[DhanHandler]: Error checking market hours: {e}")
+        return False # Default to 'closed' for safety
+
+def _handle_error_response(self, order_response: dict) -> str:
+    """Translates a failed API response into plain English."""
+    remarks = order_response.get('remarks', {})
+    error_code = remarks.get('error_code')
+    error_message = remarks.get('error_message', 'unknown error')
+
+    print(f"[DhanHandler]: Order failed. Code: {error_code}, Message: {error_message}")
+
+    # Specific, known error codes
+    if error_code == "DH-905":
+        return "The order failed. The broker said the Security ID was invalid."
+    if error_code == "DH-900":
+        return "Authentication failed. The API token is invalid or expired."
+    
+    # All other errors (like DH-906) will just return the server message
+    return f"Sorry, the order failed. The broker said: {error_message}"
+
+def place_voice_order(self, order_details: dict) -> str:
+    """
+    Takes a final, validated order dictionary and places it.
+    """
+    try:
+        is_open = self.is_market_open()
+        is_amo = not is_open
+
+        print(f"[DhanHandler]: Placing order with details: {order_details}")
+        
+        # --- THIS IS THE FIX ---
+        # Set price to 0.0 for MARKET orders, otherwise use the provided price
+        price = 0.0
+        if order_details["order_type"] == "LIMIT":
+            # Use .get() to safely handle None, though it should be a float
+            price = float(order_details.get("price", 0.0))
+        # --- END OF FIX ---
+        
+        order_response = self.dhan.place_order(
+            security_id=order_details["security_id"],
+            exchange_segment=order_details["exchange_segment"],
+            transaction_type=order_details["action"],
+            quantity=order_details["quantity"],
+            order_type=order_details["order_type"],
+            product_type="INTRADAY", # Hardcoded for safety
+            price=price,             # This will now be 0.0 for MARKET
+            validity="DAY",
+            after_market_order=is_amo # <-- Correct AMO logic
+        )
+        
+        print(f"[DhanHandler]: API Response: {order_response}")
+
+        if order_response and order_response.get('status') == 'failure':
+            return self._handle_error_response(order_response)
+
+        elif order_response and order_response.get('status') == 'success':
+            order_data = order_response.get('data', {})
+            order_status = order_data.get('orderStatus', 'UNKNOWN')
+            
+            if order_status in ("TRANSIT", "PENDING"):
+                amo_msg = " as an after market order." if is_amo else "."
+                symbol_name = order_details.get("symbol_name", order_details.get("symbol"))
+                return (f"Your {order_details['action']} order for {order_details['quantity']} shares of "
+                        f"{symbol_name} is in transit{amo_msg}")
+            else:
+                return f"Your order was successful, but the status is {order_status}."
+        
+        else:
+            return "An unknown error occurred. The API response was not recognized."
+
+    except Exception as e:
+        print(f"[DhanHandler]: An unexpected Python error occurred: {e}")
+        return f"A system error occurred. Please check the logs."].  [main.py - # --- Standard Imports ---
+import pvporcupine
+import pyaudio
+import structgit
+import json
+import os
+import time
+from dotenv import load_dotenv
+import getpass
+import re
+
+--- 1. Load All Keys and Initialize Clients ---
+print("Loading environment variables from .env...")
+load_dotenv()
+
+--- Your Project Modules ---
+from dhan_handler import DhanHandler
+from stock_finder import StockFinder
+from speech_service import say_text, record_audio, transcribe_audio
+from nlu_service import get_order_intent_gemini, fill_missing_slot_gemini
+
+Picovoice
+PICOVOICE_ACCESS_KEY = os.getenv("PICOVOICE_ACCESS_KEY")
+if not PICOVOICE_ACCESS_KEY:
+print("FATAL ERROR: PICOVOICE_ACCESS_KEY not found in .env file.")
+exit()
+
+Dhan
+DHAN_CLIENT_ID = os.getenv("DHAN_CLIENT_ID")
+DHAN_ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN")
+dhan_api = DhanHandler(DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN)
+
+Stock Finder
+try:
+stock_finder = StockFinder()
+except Exception as e:
+print(f"FATAL ERROR: Could not initialize StockFinder: {e}")
+exit()
+
+--- 2. Constants and State ---
+SAMPLE_RATE = 16000
+FRAME_LENGTH = 512
+TEMP_WAV_FILE = "temp_command.wav"
+COMMAND_DURATION_SEC = 7
+ANSWER_DURATION_SEC = 4
+
+--- Security PINs ---
+STARTUP_PIN = "252604"
+CONFIRM_PIN = "9090"
+
+--- Define our (full) application states ---
+STATE_LISTENING_FOR_WAKE_WORD = "LISTENING_FOR_WAKE_WORD"
+STATE_RECORDING_COMMAND = "RECORDING_COMMAND"
+STATE_PROCESSING = "PROCESSING"
+STATE_AWAITING_ANSWER = "AWAITING_ANSWER"
+STATE_RECORDING_ANSWER = "RECORDING_ANSWER"
+
+--- 3. Helper Functions ---
+def get_keyboard_input(prompt: str) -> str:
+"""Waits for and returns user input from the keyboard."""
+print(f"[Ledger]: {prompt}")
+user_input = input("Your input: ")
+return user_input.strip()
+
+--- 4. Main Application ---
+def main():
+porcupine = None
+audio_stream = None
+pa = pyaudio.PyAudio()
+
+code
+Code
+is_authenticated = False 
+current_state = STATE_LISTENING_FOR_WAKE_WORD
+pending_order = {} 
+missing_slot = None  
+
+try:
+    # --- Initialization ---
+    KEYWORD_PATH = "/Users/vrajpatel/Downloads/Hey-Ledger_en_mac_v3_0_0/Hey-Ledger_en_mac_v3_0_0.ppn"
+    porcupine = pvporcupine.create(access_key=PICOVOICE_ACCESS_KEY, keyword_paths=[KEYWORD_PATH], sensitivities=[0.7])
+    print("[Picovoice]: Wake word engine initialized.")
+    
+    audio_stream = pa.open(rate=SAMPLE_RATE, channels=1, format=pyaudio.paInt16, input=True, frames_per_buffer=FRAME_LENGTH)
+    print("[PyAudio]: Audio stream initialized.")
+    
+    print("\nInitialization complete.")
+    say_text("Ledger is online.")
+
+    # --- Startup PIN check using keyboard ---
+    while not is_authenticated:
+        print("[Ledger]: Please provide the 6-digit startup code in the terminal:")
+        pin_attempt = getpass.getpass("Enter 6-digit PIN: ")
+        
+        if pin_attempt == STARTUP_PIN:
+            is_authenticated = True
+            say_text("Startup code accepted. Ledger is ready.")
+        else:
+            print("[Ledger]: Incorrect code. Please try again.")
+
+    # --- THE STATE MACHINE LOOP ---
+    while True:
+        
+        if current_state == STATE_LISTENING_FOR_WAKE_WORD:
+            print(f"\n[{current_state}] Listening for 'Hey Ledger'...")
+            pcm_bytes = audio_stream.read(FRAME_LENGTH, exception_on_overflow=False)
+            pcm_unpacked = struct.unpack_from("h" * FRAME_LENGTH, pcm_bytes)
+            
+            if porcupine.process(pcm_unpacked) >= 0:
+                print(">>> Wake word detected! <<<")
+                say_text("I'm listening.")
+                current_state = STATE_RECORDING_COMMAND
+
+        elif current_state == STATE_RECORDING_COMMAND:
+            record_audio(COMMAND_DURATION_SEC, TEMP_WAV_FILE, audio_stream, FRAME_LENGTH, SAMPLE_RATE)
+            current_state = STATE_PROCESSING
+        
+        elif current_state == STATE_RECORDING_ANSWER:
+            # --- THIS IS THE NameError FIX ---
+            record_audio(ANSWER_DURATION_SEC, TEMP_WAV_FILE, audio_stream, FRAME_LENGTH, SAMPLE_RATE)
+            current_state = STATE_PROCESSING 
+        
+        elif current_state == STATE_PROCESSING:
+            
+            if missing_slot:
+                # --- We are processing an ANSWER ---
+                voice_failed = False
+                transcription = transcribe_audio(TEMP_WAV_FILE, SAMPLE_RATE)
+                
+                if not transcription:
+                    voice_failed = True
+                    say_text("I didn't catch that. Please use your keyboard.")
+                
+                if not voice_failed:
+                    # --- 1. Try voice for stock disambiguation ---
+                    if missing_slot == "symbol_disambiguation":
+                        print(f"[Disambiguation]: User answered '{transcription}'")
+                        options = pending_order.get("options", [])
+                        best_match = None
+                        search_term = transcription.lower()
+                        
+                        # --- IndexError FIX: Tuple now has 2 parts ---
+                        for (security_id, full_name) in options:
+                            if search_term in full_name.lower():
+                                best_match = (security_id, full_name)
+                                break 
+                        
+                        if best_match:
+                            print(f"[Disambiguation]: Matched to '{best_match[1]}'")
+                            pending_order["security_id"] = best_match[0]
+                            pending_order["symbol_name"] = best_match[1]
+                            del pending_order["options"] 
+                            missing_slot = None # Success!
+                        else:
+                            voice_failed = True
+                            say_text(f"I didn't understand '{transcription}'. Please use your keyboard.")
+                    
+                    # --- 2. Try voice for normal slot-filling ---
+                    else: 
+                        extracted_data = fill_missing_slot_gemini(pending_order, transcription, missing_slot)
+                        if extracted_data and extracted_data.get(missing_slot): # Check for key presence
+                            pending_order.update(extracted_data)
+                            missing_slot = None # Success!
+                        else:
+                            voice_failed = True
+                            say_text("I still didn't get that. Please use your keyboard.")
+                
+                # --- 3. KEYBOARD FALLBACK ---
+                if voice_failed:
+                    if missing_slot == "symbol_disambiguation":
+                        options = pending_order.get("options", [])
+                        print("\n--- Multiple Stock Matches ---")
+                        # --- IndexError FIX: Tuple now has 2 parts ---
+                        for i, (sec_id, name) in enumerate(options):
+                            print(f"  {i+1}: {name}") 
+                        print("--------------------------------")
+                        
+                        choice_str = get_keyboard_input(f"Enter the number (1-{len(options)}) for the stock you want:")
+                        try:
+                            choice_idx = int(choice_str) - 1
+                            if 0 <= choice_idx < len(options):
+                                id_result = options[choice_idx]
+                                pending_order["security_id"] = id_result[0]
+                                pending_order["symbol_name"] = id_result[1]
+                                del pending_order["options"]
+                                missing_slot = None # Success!
+                            else:
+                                raise ValueError("Choice out of range")
+                        except Exception as e:
+                            print(f"Error: {e}")
+                            say_text("That's not a valid selection. Cancelling order.")
+                            current_state = STATE_LISTENING_FOR_WAKE_WORD
+                            pending_order = {}
+                            missing_slot = None
+                            continue 
+                    
+                    elif missing_slot == "action":
+                        choice = get_keyboard_input("Enter 1 for BUY or 2 for SELL:")
+                        if choice == "1":
+                            pending_order["action"] = "BUY"
+                            missing_slot = None 
+                        elif choice == "2":
+                            pending_order["action"] = "SELL"
+                            missing_slot = None 
+                        else:
+                            say_text("Invalid choice. Cancelling order.")
+                            current_state = STATE_LISTENING_FOR_WAKE_WORD
+                            pending_order = {} 
+                            missing_slot = None
+                            continue
+
+                    elif missing_slot == "quantity":
+                        choice = get_keyboard_input("Enter quantity:")
+                        try:
+                            pending_order["quantity"] = int(choice)
+                            missing_slot = None 
+                        except ValueError:
+                            say_text("That's not a valid number. Cancelling order.")
+                            current_state = STATE_LISTENING_FOR_WAKE_WORD
+                            pending_order = {} 
+                            missing_slot = None
+                            continue
+                    
+                    elif missing_slot == "symbol":
+                        choice = get_keyboard_input("Enter stock name:")
+                        pending_order["symbol"] = choice
+                        missing_slot = None 
+
+            else:
+                # --- We are processing a NEW COMMAND ---
+                transcription = transcribe_audio(TEMP_WAV_FILE, SAMPLE_RATE)
+                if not transcription:
+                    say_text("I didn't catch that. Please try again.")
+                    current_state = STATE_LISTENING_FOR_WAKE_WORD
+                    continue
+                    
+                pending_order = get_order_intent_gemini(transcription)
+                if not pending_order:
+                    say_text("Sorry, I had trouble understanding the command.")
+                    current_state = STATE_LISTENING_FOR_WAKE_WORD
+                    continue
+
+            # --- Slot Checking & Follow-up ---
+            if not pending_order.get("action"):
+                say_text("Should I buy or sell?")
+                current_state = STATE_AWAITING_ANSWER
+                missing_slot = "action"
+                continue
+            
+            if not pending_order.get("quantity"):
+                say_text("How many shares?")
+                current_state = STATE_AWAITING_ANSWER
+                missing_slot = "quantity"
+                continue
+            
+            if not pending_order.get("symbol"):
+                say_text("Which stock?")
+                current_state = STATE_AWAITING_ANSWER
+                missing_slot = "symbol"
+                continue
+            
+            # --- IndexError FIX: Check for security_id (no exchange) ---
+            if "security_id" not in pending_order:
+                # id_results is now list[(id, name)]
+                id_results = stock_finder.find_security_id(pending_order["symbol"])
+                
+                if len(id_results) == 0:
+                    say_text(f"Sorry, I couldn't find a stock matching {pending_order['symbol']}. Which stock did you mean?")
+                    current_state = STATE_AWAITING_ANSWER
+                    missing_slot = "symbol"
+                    pending_order["symbol"] = None 
+                    continue
+
+                elif len(id_results) == 1:
+                    id_result = id_results[0]
+                    pending_order["security_id"] = id_result[0]
+                    pending_order["symbol_name"] = id_result[1]
+                    pending_order["exchange_segment"] = "NSE_EQ" # <-- HARDCODE "NSE_EQ"
+                    print(f"[StockFinder]: Matched to {id_result[1]} on NSE_EQ")
+
+                else:
+                    pending_order["options"] = id_results
+                    option_names = []
+                    # --- IndexError FIX: Tuple has 2 parts ---
+                    for (id, name) in id_results:
+                        short_name = " ".join(name.split()[:3])
+                        option_names.append(short_name)
+
+                    say_text(f"Which {pending_order['symbol']} did you mean?")
+                    time.sleep(0.5) 
+                    
+                    for name in option_names:
+                        say_text(name)
+                        time.sleep(0.7) 
+                    
+                    current_state = STATE_AWAITING_ANSWER
+                    missing_slot = "symbol_disambiguation"
+                    continue
+
+            # --- FINAL STEP: Request Confirmation PIN via Keyboard ---
+            say_text(f"Just to confirm, you want to {pending_order['action']} {pending_order['quantity']} shares of {pending_order['symbol_name']}.")
+            time.sleep(1.0) 
+            
+            print(f"\n[Ledger]: Please provide the 4-digit confirmation code in the terminal to execute the trade:")
+            pin_attempt = getpass.getpass("Enter 4-digit PIN: ")
+            
+            if pin_attempt == CONFIRM_PIN:
+                say_text("Code accepted. Placing your order...")
+                response_message = dhan_api.place_voice_order(pending_order)
+                say_text(response_message)
+            else:
+                say_text("Incorrect confirmation code. Order cancelled.")
+            
+            current_state = STATE_LISTENING_FOR_WAKE_WORD
+            pending_order = {}
+            missing_slot = None
+            continue 
+
+        elif current_state == STATE_AWAITING_ANSWER:
+            print(f"[{current_state}] Listening for answer for '{missing_slot}'...")
+            current_state = STATE_RECORDING_ANSWER
+
+        time.sleep(0.01) # Prevent high CPU usage
+
+except KeyboardInterrupt:
+    print("\nStopping...")
+finally:
+    if porcupine: porcupine.delete()
+    if audio_stream:
+        audio_stream.stop_stream()
+        audio_stream.close()
+    if pa: pa.terminate()
+    if os.path.exists(TEMP_WAV_FILE):
+        os.remove(TEMP_WAV_FILE)
+    print("Cleanup complete. Exiting.")
+if name == "main":
+main()
+].  [import os
+import json
+import google.generativeai as genai
+
+--- 1. Initialize Gemini Client ---
+try:
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+print("FATAL ERROR: GOOGLE_API_KEY not found in .env file.")
+exit()
+
+code
+Code
+genai.configure(api_key=GOOGLE_API_KEY)
+gemini_model = genai.GenerativeModel('models/gemini-flash-latest')
+print("[Gemini NLU]: Client initialized.")
+except Exception as e:
+print(f"FATAL ERROR: Could not initialize Gemini: {e}")
+exit()
+
+--- 2. NLU Functions ---
+def get_order_intent_gemini(transcription: str) -> dict | None:
+"""
+Uses Gemini to parse the initial command with enhanced prompt engineering.
+"""
+prompt = f"""
+You are an expert NLU system for a stock trading voice assistant.
+
+TASK: Extract trading order details from the user's spoken command.
+
+OUTPUT FORMAT: Valid JSON object with these fields:
+{{
+"action": "BUY" or "SELL" or null,
+"quantity": integer or null,
+"symbol": "spoken stock name" or null,
+"price": float or null,
+"order_type": "MARKET" or "LIMIT" or null
+}}
+
+RULES:
+
+"action": Extract only if user says "buy", "sell", "purchase", "acquire", "short", etc.
+"quantity": Extract numbers like "five", "100", "fifty shares", "10 units"
+"symbol": Extract company names like "reliance", "tata motors", "infosys"
+Include partial names: "tata" is valid
+Include abbreviations: "tcs" is valid
+"price": Extract if user mentions price: "at 1500", "for 2000 rupees"
+"order_type":
+"LIMIT" if price is mentioned
+"MARKET" if no price mentioned AND action is present
+null if action is not present
+Set ANY field to null if not explicitly mentioned
+DO NOT guess or infer missing information
+EXAMPLES:
+User: "buy 10 reliance"
+Output: {{"action": "BUY", "quantity": 10, "symbol": "reliance", "price": null, "order_type": "MARKET"}}
+
+User: "I want to purchase tata motors"
+Output: {{"action": "BUY", "quantity": null, "symbol": "tata motors", "price": null, "order_type": null}}
+
+User: "sell 50 shares of infosys at 1500"
+Output: {{"action": "SELL", "quantity": 50, "symbol": "infosys", "price": 1500.0, "order_type": "LIMIT"}}
+
+USER COMMAND: "{transcription}"
+
+JSON OUTPUT:
+"""
+
+code
+Code
+print(f"[NLU]: Analyzing command: '{transcription}'")
+response = None
+
+try:
+    response = gemini_model.generate_content(prompt)
+    json_string = response.text.strip()
+    
+    # Remove markdown code blocks if present
+    if json_string.startswith("```json"):
+        json_string = json_string[7:]
+    if json_string.startswith("```"):
+        json_string = json_string[3:]
+    if json_string.endswith("```"):
+        json_string = json_string[:-3]
+    
+    json_string = json_string.strip()
+    
+    result = json.loads(json_string)
+    print(f"[NLU]: ✓ Parsed: action={result.get('action')}, qty={result.get('quantity')}, symbol={result.get('symbol')}")
+    return result
+    
+except json.JSONDecodeError as e:
+    response_text = response.text if response else "No response"
+    print(f"[NLU]: ✗ JSON Parse Error: {e}")
+    print(f"[NLU]: Raw response: {response_text}")
+    return None
+except Exception as e:
+    response_text = response.text if response else "No response"
+    print(f"[NLU]: ✗ Error: {e} | Response: {response_text}")
+    return None
+def get_general_intent(transcription: str) -> str:
+"""
+Classifies the user's intent into broad categories.
+"""
+prompt = f"""
+Classify the user command into ONE of these intents:
+- MARKET_NEWS (asking for news, updates, what's happening)
+- PLACE_ORDER (buying, selling stocks)
+- GET_HOLDINGS (asking about portfolio, positions)
+- UNKNOWN (anything else)
+
+code
+Code
+User: "What's the news on Reliance?" -> MARKET_NEWS
+User: "Buy 10 Tata Steel" -> PLACE_ORDER
+User: "How are my stocks doing?" -> GET_HOLDINGS
+User: "{transcription}"
+
+Intent:
+"""
+try:
+    response = gemini_model.generate_content(prompt)
+    intent = response.text.strip().upper()
+    # Basic validation
+    if intent in ["MARKET_NEWS", "PLACE_ORDER", "GET_HOLDINGS", "UNKNOWN"]:
+        return intent
+    return "UNKNOWN"
+except Exception:
+    return "UNKNOWN"
+def analyze_news_sentiment(headlines: list[str]) -> str:
+"""
+Analyzes headlines and returns a concise summary with sentiment.
+"""
+headlines_text = "\n".join([f"- {h}" for h in headlines])
+
+code
+Code
+prompt = f"""
+Analyze these news headlines for the Indian Stock Market:
+{headlines_text}
+
+1. Provide a very brief summary (2 sentences max).
+2. Determine the overall sentiment: POSITIVE, NEGATIVE, or NEUTRAL.
+
+Output format: "Summary... [Sentiment]"
+"""
+try:
+    response = gemini_model.generate_content(prompt)
+    return response.text.strip()
+except Exception:
+    return "I couldn't analyze the news right now."
+def fill_missing_slot_gemini(pending_order: dict, follow_up_answer: str, missing_slot: str) -> dict | None:
+"""
+Uses Gemini to extract a single missing piece of information.
+"""
+prompt = f"""
+You are a slot-filling assistant for a stock trading system.
+
+CONTEXT: User's partial order:
+{json.dumps(pending_order, indent=2)}
+
+MISSING INFORMATION: "{missing_slot}"
+
+USER'S ANSWER: "{follow_up_answer}"
+
+TASK: Extract ONLY the "{missing_slot}" value from the user's answer.
+
+EXTRACTION RULES:
+
+If missing_slot is "action": Extract "BUY" or "SELL"
+Examples: "buy" → "BUY", "sell it" → "SELL", "purchase" → "BUY"
+If missing_slot is "quantity": Extract integer
+Examples: "five" → 5, "100 shares" → 100, "fifty" → 50
+If missing_slot is "symbol": Extract stock name exactly as spoken
+Examples: "reliance" → "reliance", "tata motors" → "tata motors"
+If missing_slot is "price": Extract float
+Examples: "1500" → 1500.0, "at 2000" → 2000.0
+OUTPUT FORMAT: Valid JSON with ONLY the extracted field:
+{{
+"{missing_slot}": "EXTRACTED_VALUE"
+}}
+
+EXAMPLES:
+Missing: "action", Answer: "I want to buy" → {{"action": "BUY"}}
+Missing: "quantity", Answer: "fifty shares" → {{"quantity": 50}}
+Missing: "symbol", Answer: "tata motors" → {{"symbol": "tata motors"}}
+
+JSON OUTPUT:
+"""
+
+code
+Code
+print(f"[NLU Slot-Fill]: Extracting '{missing_slot}' from: '{follow_up_answer}'")
+response = None
+
+try:
+    response = gemini_model.generate_content(prompt)
+    json_string = response.text.strip()
+    
+    # Remove markdown code blocks
+    if json_string.startswith("```json"):
+        json_string = json_string[7:]
+    if json_string.startswith("```"):
+        json_string = json_string[3:]
+    if json_string.endswith("```"):
+        json_string = json_string[:-3]
+    
+    json_string = json_string.strip()
+    
+    result = json.loads(json_string)
+    
+    if missing_slot in result and result[missing_slot] is not None:
+        print(f"[NLU Slot-Fill]: ✓ Extracted {missing_slot}={result[missing_slot]}")
+        return result
+    else:
+        print(f"[NLU Slot-Fill]: ✗ Failed to extract '{missing_slot}'")
+        return None
+        
+except json.JSONDecodeError as e:
+    response_text = response.text if response else "No response"
+    print(f"[NLU Slot-Fill]: ✗ JSON Parse Error: {e}")
+    print(f"[NLU Slot-Fill]: Raw response: {response_text}")
+    return None
+except Exception as e:
+    response_text = response.text if response else "No response"
+    print(f"[NLU Slot-Fill]: ✗ Error: {e} | Response: {response_text}")
+    return None
+nlu_service.py].  [import feedparser
+import urllib.parse
+
+def get_latest_market_news(query: str = "Indian Stock Market") -> list[str]:
+"""
+Fetches top 5 headlines from Google News RSS.
+Returns a list of strings to send to Gemini.
+"""
+print(f"[News]: Fetching news for '{query}'...")
+
+code
+Code
+# Encode query for URL
+encoded_query = urllib.parse.quote(query)
+rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-IN&gl=IN&ceid=IN:en"
+
+try:
+    feed = feedparser.parse(rss_url)
+    headlines = []
+    
+    # Only take top 5 to save Gemini tokens
+    for entry in feed.entries[:5]:
+        title = entry.title
+        # Google news titles often look like "Headline - Source", clean it up if needed
+        headlines.append(title)
+        
+    print(f"[News]: Found {len(headlines)} headlines.")
+    return headlines
+except Exception as e:
+    print(f"[News]: Error fetching news: {e}")
+    return []. news_service.py].  [server.py - I am trying to create backend server so introduced this navigating from terminal only flow from main.py file from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import uvicorn
+import base64
+import os
+from dotenv import load_dotenv
+
+Load environment variables FIRST
+load_dotenv()
+
+Import services
+from nlu_service import get_general_intent, get_order_intent_gemini, analyze_news_sentiment, fill_missing_slot_gemini
+from speech_service import generate_audio_bytes
+from dhan_handler import DhanHandler
+from stock_finder import StockFinder
+from news_service import get_latest_market_news
+
+Initialize App & Handlers
+app = FastAPI()
+
+Initialize Logic Handlers
+try:
+dhan_api = DhanHandler(os.getenv("DHAN_CLIENT_ID"), os.getenv("DHAN_ACCESS_TOKEN"))
+stock_finder = StockFinder()
+except Exception as e:
+print(f"Server Init Error: {e}")
+
+--- Data Models ---
+class UserRequest(BaseModel):
+message: str
+# We can pass client-side state here later (e.g., current_order context)
+context: dict = {}
+
+class BotResponse(BaseModel):
+text: str
+audio_base64: str # Base64 encoded audio for browser to play
+data: dict = {}   # Any extra data (like stock price to display)
+
+--- Logic Helper ---
+def process_command(text: str, context: dict):
+"""
+Main logic router.
+"""
+# 1. Check if we are in the middle of an order flow (Context Check)
+if context.get("status") == "awaiting_slot":
+# Handle slot filling (Logic to be migrated from main.py later)
+# For now, let's keep it simple: Reset if user changes topic
+pass
+
+code
+Code
+# 2. Classify Intent
+intent = get_general_intent(text)
+print(f"Intent Detected: {intent}")
+
+response_text = ""
+
+if intent == "MARKET_NEWS":
+    # Extract entity (simple heuristic or use Gemini again)
+    query = "Indian Stock Market" 
+    if "reliance" in text.lower(): query = "Reliance Industries"
+    if "adani" in text.lower(): query = "Adani Group"
+    
+    headlines = get_latest_market_news(query)
+    if headlines:
+        summary = analyze_news_sentiment(headlines)
+        response_text = f"Here is the latest news for {query}. {summary}"
+    else:
+        response_text = f"I couldn't find any recent news for {query}."
+
+elif intent == "PLACE_ORDER":
+    order_data = get_order_intent_gemini(text)
+    if order_data:
+        # (Simplified flow for V1 server - full flow needs state management)
+        response_text = f"I understood you want to {order_data.get('action')} {order_data.get('quantity')} shares of {order_data.get('symbol')}. I need to connect the Order Manager to this server next."
+    else:
+        response_text = "I didn't quite catch the order details."
+
+elif intent == "GET_HOLDINGS":
+    # Call Dhan API
+    # (Future integration)
+    response_text = "I can fetch your holdings, but I need to verify your PIN first."
+
+else:
+    # Fallback chat
+    response_text = "I'm listening. You can ask for news, holdings, or place an order."
+
+return response_text
+--- API Endpoint ---
+@app.post("/chat", response_model=BotResponse)
+async def chat_endpoint(request: UserRequest):
+"""
+Receives text (from browser STT), processes logic, returns text + audio.
+"""
+user_text = request.message
+context = request.context
+
+code
+Code
+# 1. Process Logic
+reply_text = process_command(user_text, context)
+
+# 2. Generate Audio (ElevenLabs)
+audio_bytes = generate_audio_bytes(reply_text)
+audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+
+return BotResponse(
+    text=reply_text,
+    audio_base64=audio_b64,
+    data={"intent": "unknown"} # Can send debug info back
+)
+if name == "main":
+print("Starting Voice Trader Server...")
+uvicorn.run(app, host="0.0.0.0", port=8000)].  [import os
+import wave
+import pyaudio
+from google.cloud import speech
+from elevenlabs import ElevenLabs, stream
+
+--- 1. Initialize Clients ---
+
+Google Speech-to-Text (STT)
+try:
+speech_client = speech.SpeechClient()
+print("[Google STT]: Client initialized.")
+except Exception as e:
+print(f"FATAL ERROR: Google STT init failed: {e}")
+
+ElevenLabs Text-to-Speech (TTS)
+try:
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+if not ELEVENLABS_API_KEY:
+print("FATAL ERROR: ELEVENLABS_API_KEY not found in .env file.")
+exit()
+eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+print("[ElevenLabs TTS]: Client initialized.")
+except Exception as e:
+print(f"FATAL ERROR: ElevenLabs init failed: {e}")
+
+==========================================
+
+SECTION A: WEB SERVER FUNCTIONS (For server.py)
+
+==========================================
+def generate_audio_bytes(text: str) -> bytes:
+"""
+Generates audio bytes using ElevenLabs.
+Returns raw bytes to be sent to the Frontend (Browser).
+"""
+print(f"[TTS]: Generating audio for: '{text}'")
+try:
+# Convert text to audio generator
+audio_generator = eleven_client.text_to_speech.convert(
+text=text,
+voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel
+model_id="eleven_multilingual_v2"
+)
+# Consume generator to get full byte string
+audio_bytes = b"".join(audio_generator)
+return audio_bytes
+except Exception as e:
+print(f"[TTS]: Generation Error: {e}")
+return b""
+
+def transcribe_audio_bytes(audio_content: bytes) -> str:
+"""
+Transcribes raw audio bytes received from the Frontend.
+"""
+try:
+audio = speech.RecognitionAudio(content=audio_content)
+config = speech.RecognitionConfig(
+encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+sample_rate_hertz=16000, # Browser must send 16k wav
+language_code="en-IN",
+)
+
+code
+Code
+response = speech_client.recognize(config=config, audio=audio)
+    
+    if response.results:
+        transcription = response.results[0].alternatives[0].transcript
+        print(f"[STT]: Result: '{transcription}'")
+        return transcription
+    return ""
+except Exception as e:
+    print(f"[STT]: Error: {e}")
+    return ""
+==========================================
+
+SECTION B: LOCAL TERMINAL FUNCTIONS (For main.py)
+
+==========================================
+def say_text(text: str):
+"""
+Speaks text locally on the server/laptop speakers.
+"""
+print(f"[Ledger]: {text}")
+try:
+audio_stream = eleven_client.text_to_speech.convert(
+text=text,
+voice_id="21m00Tcm4TlvDq8ikWAM",
+model_id="eleven_multilingual_v2"
+)
+stream(audio_stream)
+except Exception as e:
+print(f"ElevenLabs TTS Error: {e}")
+
+def record_audio(duration_sec, file_path, audio_stream, frame_length, sample_rate):
+"""
+Records audio from the local microphone.
+"""
+print(f"Recording for {duration_sec} seconds...")
+frames = []
+num_frames = int((sample_rate / frame_length) * duration_sec)
+
+code
+Code
+for _ in range(num_frames):
+    try:
+        data = audio_stream.read(frame_length, exception_on_overflow=False)
+        frames.append(data)
+    except IOError:
+        pass
+
+wf = wave.open(file_path, 'wb')
+wf.setnchannels(1)
+wf.setsampwidth(pyaudio.PyAudio().get_sample_size(pyaudio.paInt16))
+wf.setframerate(sample_rate)
+wf.writeframes(b''.join(frames))
+wf.close()
+print(f"Audio saved to {file_path}")
+def transcribe_audio(file_path: str, sample_rate: int) -> str:
+"""
+Transcribes a local .wav file.
+"""
+print(f"Sending {file_path} to Google STT...")
+try:
+with open(file_path, "rb") as audio_file:
+content = audio_file.read()
+
+code
+Code
+# Re-use the byte transcriber logic to avoid duplication code
+    return transcribe_audio_bytes(content)
+    
+except Exception as e:
+    print(f"Google STT Error: {e}")
+    return ""].   [import pandas as pd
+import os
+from difflib import SequenceMatcher
+
+CSV_FILE_PATH = "/Users/vrajpatel/Desktop/SBU/HCI/voice-trader/NSE_ONLY_STOCKS.csv"
+
+class StockFinder:
+def init(self, csv_path=CSV_FILE_PATH):
+"""
+Loads the stock master file into a pandas DataFrame.
+"""
+if not os.path.exists(csv_path):
+print(f"[StockFinder]: FATAL ERROR - CSV file not found at: {csv_path}")
+raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+code
+Code
+try:
+        self.df = pd.read_csv(csv_path)
+        
+        # Validate required columns
+        required_columns = ['UNDERLYING_SYMBOL', 'SECURITY_ID']
+        missing_columns = [col for col in required_columns if col not in self.df.columns]
+        
+        if missing_columns:
+            print(f"[StockFinder]: FATAL ERROR - Missing required columns: {missing_columns}")
+            raise KeyError(f"Missing columns: {missing_columns}")
+        
+        # Create normalized search column
+        self.df['search_name'] = (
+            self.df['UNDERLYING_SYMBOL']
+            .str.lower()
+            .str.replace(' limited', '', regex=False)
+            .str.replace(' ltd', '', regex=False)
+            .str.replace('.', '', regex=False)
+            .str.replace('-', ' ', regex=False)
+            .str.strip()
+        )
+        
+        # Create alternate search with common abbreviations
+        self.df['abbrev_name'] = (
+            self.df['search_name']
+            .str.replace('industries', 'ind', regex=False)
+            .str.replace('technologies', 'tech', regex=False)
+            .str.replace('limited', '', regex=False)
+        )
+        
+        print(f"[StockFinder]: Loaded {len(self.df)} stocks from {csv_path}")
+        
+    except Exception as e:
+        print(f"[StockFinder]: FATAL ERROR - Could not load or process CSV: {e}")
+        raise
+
+def _similarity_score(self, str1: str, str2: str) -> float:
+    """Calculate similarity ratio between two strings."""
+    return SequenceMatcher(None, str1, str2).ratio()
+
+def find_security_id(self, spoken_symbol: str) -> list[tuple[str, str]]:
+    """
+    Finds all possible matches for a spoken symbol.
+    Returns a list of tuples: (security_id, full_name)
+    
+    Matching strategy:
+    1. Exact match on normalized name (highest priority)
+    2. Exact match on abbreviated name
+    3. All words present in name (partial match)
+    4. Fuzzy match (similarity > 0.7)
+    5. Single word match (last resort)
+    """
+    if not spoken_symbol:
+        print("[StockFinder]: Empty search term provided.")
+        return []
+        
+    search_term = spoken_symbol.lower().strip()
+    search_words = search_term.split()
+    
+    print(f"[StockFinder]: Searching for '{spoken_symbol}' (words: {search_words})")
+    
+    # --- STRATEGY 1: Exact match on normalized name ---
+    exact_match = self.df[self.df['search_name'] == search_term]
+    if not exact_match.empty:
+        row = exact_match.iloc[0]
+        print(f"[StockFinder]: ✓ Found EXACT match: {row['UNDERLYING_SYMBOL']}")
+        return [(str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])]
+    
+    # --- STRATEGY 2: Exact match on abbreviated name ---
+    abbrev_match = self.df[self.df['abbrev_name'] == search_term]
+    if not abbrev_match.empty:
+        row = abbrev_match.iloc[0]
+        print(f"[StockFinder]: ✓ Found ABBREVIATION match: {row['UNDERLYING_SYMBOL']}")
+        return [(str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])]
+    
+    # --- STRATEGY 3: All words present (order-independent) ---
+    if len(search_words) > 1:
+        mask = pd.Series([True] * len(self.df))
+        for word in search_words:
+            mask = mask & self.df['search_name'].str.contains(word, na=False, regex=False)
+        
+        all_words_match = self.df[mask]
+        if not all_words_match.empty:
+            matches = [
+                (str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])
+                for _, row in all_words_match.iterrows()
+            ]
+            print(f"[StockFinder]: ✓ Found {len(matches)} ALL-WORDS matches")
+            return matches[:5]
+    
+    # --- STRATEGY 4: Fuzzy matching (similarity > 0.7) ---
+    print("[StockFinder]: Attempting fuzzy match...")
+    self.df['similarity'] = self.df['search_name'].apply(
+        lambda x: self._similarity_score(search_term, x)
+    )
+    
+    fuzzy_matches = self.df[self.df['similarity'] > 0.7].sort_values('similarity', ascending=False)
+    if not fuzzy_matches.empty:
+        matches = [
+            (str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])
+            for _, row in fuzzy_matches.head(5).iterrows()
+        ]
+        print(f"[StockFinder]: ✓ Found {len(matches)} FUZZY matches (similarity > 0.7)")
+        return matches
+    
+    # --- STRATEGY 5: Single word match (last resort) ---
+    if len(search_words) == 1:
+        single_word_match = self.df[
+            self.df['search_name'].str.contains(search_words[0], na=False, regex=False)
+        ]
+        if not single_word_match.empty:
+            matches = [
+                (str(row['SECURITY_ID']), row['UNDERLYING_SYMBOL'])
+                for _, row in single_word_match.iterrows()
+            ]
+            print(f"[StockFinder]: ✓ Found {len(matches)} PARTIAL matches")
+            return matches[:5]
+    
+    # --- NO MATCH FOUND ---
+    print(f"[StockFinder]: ✗ No match found for '{spoken_symbol}'")
+    return []].   what we need to implement is Phase 1: Pre-Trade Intelligence (Funds & Margin) {Check Funds (Implicit) and  even user still pursues to place order in insufficient margin then we should tell them Insufficient Funds (Real Mode): Insufficient funds. Order cancelled."},  Phase 2: Portfolio Awareness - Check Holdings:
+"What do I have in my portfolio?"
+Expected: "You have X stocks in your long-term holdings..."
+Check Positions:
+"Tell me my open positions."
+Expected: "You have Y open intraday positions..." . Phase 3: Live Market Data - Check Price:
+"What is the price of Reliance?"
+Expected: "The current price of Reliance Industries is 2500.00 rupees."
+Check Another Price:
+"How is Tata Motors doing?"
+Expected: "The current price of Tata Motors is 450.00 rupees with this much % movement ."  Phase 5: Proactive Updates Order Fill Notification:
+Action: Place a LIMIT order via voice ("Buy 1 SBI at [Current Price - 5]").
+Action: Wait for it to fill (or modify it to market on your phone/web).
+Expected: "Your order for SBI has been executed."       , then phase 6 : I wanna integrate live news feed making system context aware on sentiment of market bullish , neutral , bearish full context aware [it could be of index or stock !] then on frontend side of things The Blob that responds when the user hovers or clicks and starts to listen to voice commands, giving the user sufficient time to speak what he or she wants to say. Right!, and a new state of the system when user intreputs it should listen for commands what user really wants .
+the visual interaction should be more interactive and user friendly. and the blob should be more attractive and eye catchy. with some animation effects. glowing around it when user hovers over it. and when user clicks on it the blob should change its color and start listening to voice commands. and when user stops speaking the blob should stop listening and go back to its of processing
+state. and the blob should also have some sound effects when user hovers over it and clicks on it. like a soft chime sound when user hovers over it and a click sound when user clicks on it. and the blob should also have some visual feedback when it is listening to voice commands. like a pulsing effect or a waveform animation. overall the visual interaction should be smooth and seamless and should enhance the user experience.
+
+how do we start and where to [and ask me for dhan documentation !]

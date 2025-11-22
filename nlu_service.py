@@ -94,7 +94,54 @@ JSON OUTPUT:
         response_text = response.text if response else "No response"
         print(f"[NLU]: ✗ Error: {e} | Response: {response_text}")
         return None
+def get_general_intent(transcription: str) -> str:
+    """
+    Classifies the user's intent into broad categories.
+    """
+    prompt = f"""
+    Classify the user command into ONE of these intents:
+    - MARKET_NEWS (asking for news, updates, what's happening)
+    - PLACE_ORDER (buying, selling stocks)
+    - GET_HOLDINGS (asking about portfolio, positions)
+    - UNKNOWN (anything else)
+    
+    User: "What's the news on Reliance?" -> MARKET_NEWS
+    User: "Buy 10 Tata Steel" -> PLACE_ORDER
+    User: "How are my stocks doing?" -> GET_HOLDINGS
+    User: "{transcription}"
+    
+    Intent:
+    """
+    try:
+        response = gemini_model.generate_content(prompt)
+        intent = response.text.strip().upper()
+        # Basic validation
+        if intent in ["MARKET_NEWS", "PLACE_ORDER", "GET_HOLDINGS", "UNKNOWN"]:
+            return intent
+        return "UNKNOWN"
+    except Exception:
+        return "UNKNOWN"
 
+def analyze_news_sentiment(headlines: list[str]) -> str:
+    """
+    Analyzes headlines and returns a concise summary with sentiment.
+    """
+    headlines_text = "\n".join([f"- {h}" for h in headlines])
+    
+    prompt = f"""
+    Analyze these news headlines for the Indian Stock Market:
+    {headlines_text}
+    
+    1. Provide a very brief summary (2 sentences max).
+    2. Determine the overall sentiment: POSITIVE, NEGATIVE, or NEUTRAL.
+    
+    Output format: "Summary... [Sentiment]"
+    """
+    try:
+        response = gemini_model.generate_content(prompt)
+        return response.text.strip()
+    except Exception:
+        return "I couldn't analyze the news right now."
 
 def fill_missing_slot_gemini(pending_order: dict, follow_up_answer: str, missing_slot: str) -> dict | None:
     """

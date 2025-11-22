@@ -11,9 +11,7 @@ try:
     speech_client = speech.SpeechClient()
     print("[Google STT]: Client initialized.")
 except Exception as e:
-    print(f"FATAL ERROR: Could not initialize Google Speech Client: {e}")
-    print("Please ensure 'GOOGLE_APPLICATION_CREDENTIALS' is set correctly.")
-    exit()
+    print(f"FATAL ERROR: Google STT init failed: {e}")
 
 # ElevenLabs Text-to-Speech (TTS)
 try:
@@ -24,30 +22,79 @@ try:
     eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
     print("[ElevenLabs TTS]: Client initialized.")
 except Exception as e:
-    print(f"FATAL ERROR: Could not initialize ElevenLabs: {e}")
-    exit()
+    print(f"FATAL ERROR: ElevenLabs init failed: {e}")
 
-# --- 2. Audio Functions ---
+
+# ==========================================
+#  SECTION A: WEB SERVER FUNCTIONS (For server.py)
+# ==========================================
+
+def generate_audio_bytes(text: str) -> bytes:
+    """
+    Generates audio bytes using ElevenLabs.
+    Returns raw bytes to be sent to the Frontend (Browser).
+    """
+    print(f"[TTS]: Generating audio for: '{text}'")
+    try:
+        # Convert text to audio generator
+        audio_generator = eleven_client.text_to_speech.convert(
+            text=text,
+            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel
+            model_id="eleven_multilingual_v2"
+        )
+        # Consume generator to get full byte string
+        audio_bytes = b"".join(audio_generator)
+        return audio_bytes
+    except Exception as e:
+        print(f"[TTS]: Generation Error: {e}")
+        return b""
+
+def transcribe_audio_bytes(audio_content: bytes) -> str:
+    """
+    Transcribes raw audio bytes received from the Frontend.
+    """
+    try:
+        audio = speech.RecognitionAudio(content=audio_content)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=16000, # Browser must send 16k wav
+            language_code="en-IN",
+        )
+        
+        response = speech_client.recognize(config=config, audio=audio)
+        
+        if response.results:
+            transcription = response.results[0].alternatives[0].transcript
+            print(f"[STT]: Result: '{transcription}'")
+            return transcription
+        return ""
+    except Exception as e:
+        print(f"[STT]: Error: {e}")
+        return ""
+
+
+# ==========================================
+#  SECTION B: LOCAL TERMINAL FUNCTIONS (For main.py)
+# ==========================================
 
 def say_text(text: str):
     """
-    Speaks text using the ElevenLabs TTS engine.
+    Speaks text locally on the server/laptop speakers.
     """
     print(f"[Ledger]: {text}")
     try:
         audio_stream = eleven_client.text_to_speech.convert(
             text=text,
-            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel's voice ID
+            voice_id="21m00Tcm4TlvDq8ikWAM",
             model_id="eleven_multilingual_v2"
         )
-        stream(audio_stream) # This handles playback automatically
-        
+        stream(audio_stream)
     except Exception as e:
         print(f"ElevenLabs TTS Error: {e}")
 
 def record_audio(duration_sec, file_path, audio_stream, frame_length, sample_rate):
     """
-    Records audio from the stream for a set duration and saves to file.
+    Records audio from the local microphone.
     """
     print(f"Recording for {duration_sec} seconds...")
     frames = []
@@ -70,28 +117,16 @@ def record_audio(duration_sec, file_path, audio_stream, frame_length, sample_rat
 
 def transcribe_audio(file_path: str, sample_rate: int) -> str:
     """
-    Sends a local audio file to Google Cloud Speech-to-Text.
+    Transcribes a local .wav file.
     """
     print(f"Sending {file_path} to Google STT...")
     try:
         with open(file_path, "rb") as audio_file:
             content = audio_file.read()
         
-        audio = speech.RecognitionAudio(content=content)
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=sample_rate,
-            language_code="en-IN",
-        )
+        # Re-use the byte transcriber logic to avoid duplication code
+        return transcribe_audio_bytes(content)
         
-        response = speech_client.recognize(config=config, audio=audio)
-        
-        if response.results:
-            transcription = response.results[0].alternatives[0].transcript
-            print(f"Google STT Result: '{transcription}'")
-            return transcription
-        
-        return ""
     except Exception as e:
         print(f"Google STT Error: {e}")
         return ""
