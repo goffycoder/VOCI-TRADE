@@ -21,3 +21,7 @@ temp_command.wav
 # Python virtual environment
 venv/
 __pycache__/
+
+# Frontend ignores
+voice-trader-ui/node_modules/
+voice-trader-ui/.env
