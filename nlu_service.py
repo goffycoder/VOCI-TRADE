@@ -19,7 +19,8 @@ except Exception as e:
 # --- 2. NLU Functions ---
 def get_order_intent_gemini(transcription: str) -> dict | None:
     """
-    Uses Gemini to parse the initial command with enhanced prompt engineering.
+    Parses natural language into a structured order dictionary.
+    Supports Market, Limit, and Super Orders.
     """
     prompt = f"""
 You are an expert NLU system for a stock trading voice assistant.
@@ -28,11 +29,15 @@ TASK: Extract trading order details from the user's spoken command.
 
 OUTPUT FORMAT: Valid JSON object with these fields:
 {{
-  "action": "BUY" or "SELL" or null,
-  "quantity": integer or null,
-  "symbol": "spoken stock name" or null,
-  "price": float or null,
-  "order_type": "MARKET" or "LIMIT" or null
+  "action": "BUY" | "SELL" | null,
+  "quantity": integer | null,
+  "symbol": "string" | null,
+  "price": float | null,              # Limit Price (if user says "at 500")
+  "order_type": "MARKET" | "LIMIT",   # Default to MARKET if no price mentioned
+  "is_super_order": boolean,          # True if Target or Stop Loss is mentioned
+  "target_price": float | null,       # For Super Order (Target/Profit)
+  "stop_loss_price": float | null,    # For Super Order (Stop Loss)
+  "trailing_jump": float | null       # For Super Order (Trailing Stop)
 }}
 
 RULES:
@@ -48,16 +53,15 @@ RULES:
    - null if action is not present
 6. Set ANY field to null if not explicitly mentioned
 7. DO NOT guess or infer missing information
+8. If user says "at [price]", set "price" and "order_type": "LIMIT".
+9. If user mentions "target", "profit", or "stop loss", set "is_super_order": true.
+10. If no price is mentioned, set "order_type": "MARKET" and "price": 0.0.
+
 
 EXAMPLES:
-User: "buy 10 reliance"
-Output: {{"action": "BUY", "quantity": 10, "symbol": "reliance", "price": null, "order_type": "MARKET"}}
-
-User: "I want to purchase tata motors"
-Output: {{"action": "BUY", "quantity": null, "symbol": "tata motors", "price": null, "order_type": null}}
-
-User: "sell 50 shares of infosys at 1500"
-Output: {{"action": "SELL", "quantity": 50, "symbol": "infosys", "price": 1500.0, "order_type": "LIMIT"}}
+"Buy 10 Reliance" -> {{"action": "BUY", "quantity": 10, "symbol": "Reliance", "order_type": "MARKET", "is_super_order": false}}
+"Sell 50 Tata Motors at 950" -> {{"action": "SELL", "quantity": 50, "symbol": "Tata Motors", "price": 950.0, "order_type": "LIMIT", "is_super_order": false}}
+"Buy 100 HDFC at 1500 with target 1600 and stop loss 1400" -> {{"action": "BUY", "quantity": 100, "symbol": "HDFC", "price": 1500.0, "order_type": "LIMIT", "is_super_order": true, "target_price": 1600.0, "stop_loss_price": 1400.0}}
 
 USER COMMAND: "{transcription}"
 
@@ -95,28 +99,72 @@ JSON OUTPUT:
         print(f"[NLU]: ✗ Error: {e} | Response: {response_text}")
         return None
 
+def translate_if_needed(text: str) -> str:
+    """
+    Detects if text is non-English (specifically Hindi/Hinglish) and translates to English.
+    Returns original text if already English.
+    """
+    model = genai.GenerativeModel('gemini-pro')
+    prompt = f"""
+    Analyze the following text: "{text}"
+    
+    If it is in Hindi or Hinglish (Hindi written in English), translate it to a clear English trading command.
+    If it is already in English, return the original text exactly.
+    
+    Examples:
+    "Reliance ka price kya hai" -> "What is the price of Reliance"
+    "10 share kharido Tata Motors ke" -> "Buy 10 shares of Tata Motors"
+    "Market kaisa hai" -> "Show market news"
+    "Mere holdings dikhao" -> "Show my holdings"
+    "Show me the price of TCS" -> "Show me the price of TCS"
+    
+    Output ONLY the translated English text (or original). No explanations.
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        translated = response.text.strip()
+        if translated.lower() != text.lower():
+            print(f"[Translation]: {text} -> {translated}")
+        return translated
+    except Exception as e:
+        print(f"Translation Error: {e}")
+        return text
+
 def get_general_intent(transcription: str) -> str:
     """
-    Classifies the user command.
+    Determines the general intent of a user's command using Gemini.
     """
     prompt = f"""
-    Classify the user command into ONE of these intents:
-    - MARKET_NEWS: Asking for news, what's happening.
-    - PLACE_ORDER: Buying or selling specific stocks.
-    - GET_HOLDINGS: Asking "what do I own", "my portfolio".
-    - GET_POSITIONS: Asking "my open positions", "my profit today", "intraday status".
-    - GET_FUNDS: Asking "my balance", "how much cash", "funds available".
-    - CHECK_PRICE: Asking "price of [stock]", "how is [stock] trading", "quote for [stock]".
-    - UNKNOWN: Anything else.
-    
-    User: "What is the price of Reliance?" -> CHECK_PRICE
-    User: "How much money do I have?" -> GET_FUNDS
-    User: "What are my open positions?" -> GET_POSITIONS
-    User: "Buy 10 Tata Steel" -> PLACE_ORDER
-    User: "{transcription}"
-    
-    Intent:
-    """
+You are an NLU system for a stock trading voice assistant.
+Your task is to classify the user's command into one of the following intents:
+- MARKET_NEWS: User wants to know about market news, headlines, or general market updates.
+- PLACE_ORDER: User wants to buy or sell stocks.
+- GET_HOLDINGS: User wants to see their current stock holdings.
+- GET_POSITIONS: User wants to see their open trading positions.
+- GET_FUNDS: User wants to know their available funds or balance.
+- CHECK_PRICE: User wants to know the price of a specific stock.
+- UNKNOWN: The intent cannot be determined from the given command.
+
+RULES:
+- Be strict with classification. If unsure, classify as UNKNOWN.
+- Output ONLY the intent name in uppercase.
+
+EXAMPLES:
+"What's the news today?" -> MARKET_NEWS
+"Buy 10 shares of Reliance" -> PLACE_ORDER
+"Sell Tata Motors" -> PLACE_ORDER
+"Show me my portfolio" -> GET_HOLDINGS
+"What are my current positions?" -> GET_POSITIONS
+"How much money do I have?" -> GET_FUNDS
+"What is the price of HDFC?" -> CHECK_PRICE
+"Tell me a joke" -> UNKNOWN
+"Hello" -> UNKNOWN
+
+USER COMMAND: "{transcription}"
+
+INTENT:
+"""
     try:
         response = gemini_model.generate_content(prompt)
         intent = response.text.strip().upper()
@@ -224,3 +272,39 @@ JSON OUTPUT:
         print(f"[NLU Slot-Fill]: ✗ Error: {e} | Response: {response_text}")
         return None
 
+def extract_news_topic(text: str) -> str:
+    """
+    Extracts the specific company, index, or topic for news search.
+    Defaults to 'Indian Stock Market' if no specific topic is found.
+    """
+    prompt = f"""
+    You are an entity extractor for a stock market news bot.
+    
+    TASK: Identify the specific company, stock symbol, sector, or topic the user wants news about.
+    
+    RULES:
+    1. If the user mentions a specific name (e.g., "HDFC", "Zomato", "Bank Nifty", "IT Sector"), return that name.
+    2. If the user asks generically (e.g., "market news", "what is happening", "latest updates"), return "Indian Stock Market".
+    3. Append "Share Price India" to company names to ensure financial news results.
+    
+    EXAMPLES:
+    User: "Tell me news about Reliance" -> "Reliance Industries Share Price India"
+    User: "What is happening with Zomato?" -> "Zomato Share Price India"
+    User: "Any news on Tata Motors?" -> "Tata Motors Share Price India"
+    User: "Give me the market headlines" -> "Indian Stock Market"
+    User: "News for HDFC Bank" -> "HDFC Bank Share Price India"
+    
+    USER INPUT: "{text}"
+    
+    OUTPUT (Just the string):
+    """
+    try:
+        # Assuming 'gemini_model' is initialized globally in this file as per your previous code
+        response = gemini_model.generate_content(prompt)
+        topic = response.text.strip()
+        # clean up any quotes or extra formatting
+        topic = topic.replace('"', '').replace("'", "").strip()
+        return topic
+    except Exception as e:
+        print(f"[NLU]: Error extracting news topic: {e}")
+        return "Indian Stock Market"

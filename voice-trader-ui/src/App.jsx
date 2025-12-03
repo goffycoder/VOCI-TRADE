@@ -1,33 +1,49 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, Activity, DollarSign, TrendingUp, FileText, X } from 'lucide-react';
 import './App.css';
+import { useAudioController } from './hooks/useAudioController';
+import HistoryFeed from './components/HistoryFeed';
+import InteractionIsland from './components/InteractionIsland';
+import Header from './components/Header';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider, useToast } from './hooks/useToast';
+import CommandPalette from './components/CommandPalette';
+import QuickActions from './components/QuickActions';
 
-function App() {
-  // UI States
-  const [mode, setMode] = useState("IDLE"); // IDLE, LISTENING, PROCESSING, SPEAKING
+function VoiceTraderApp() {
+  const [mode, setMode] = useState("IDLE");
   const [transcript, setTranscript] = useState("");
-  
-  // The "Canvas" - A history of interactions
-  const [history, setHistory] = useState([]); 
-  
-  // Audio Ref for Interrupt handling
-  const audioRef = useRef(new Audio());
-  const recognitionRef = useRef(null);
-  const canvasRef = useRef(null);
+  const [history, setHistory] = useState([]);
+  const [serverContext, setServerContext] = useState({});
+  const [isConnected, setIsConnected] = useState(true);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
-  // --- 1. INITIALIZATION ---
+  const { playSfx, playBgm, playVoice, stopVoice, setBgmVolume } = useAudioController();
+  const toast = useToast();
+  const recognitionRef = useRef(null);
+
+
+  // Initialize Audio
   useEffect(() => {
+    // Start Ambient Music on first interaction
+    const initAudio = () => {
+      playBgm('AMBIENT');
+      window.removeEventListener('click', initAudio);
+      window.removeEventListener('keydown', initAudio);
+    };
+    window.addEventListener('click', initAudio);
+    window.addEventListener('keydown', initAudio);
+
+    // STT Setup
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.lang = 'en-IN';
-      recognition.interimResults = false;
-
-      recognition.onstart = () => setMode("LISTENING");
-      
+      recognition.onstart = () => {
+        setMode("LISTENING");
+        setBgmVolume(0.1); // Duck volume
+      };
       recognition.onresult = async (event) => {
         const text = event.results[0][0].transcript;
         setMode("PROCESSING");
@@ -35,202 +51,212 @@ function App() {
         recognition.stop();
         await handleCommand(text);
       };
-
       recognitionRef.current = recognition;
     }
 
-    // Spacebar Global Interrupt
+    // Spacebar to toggle listening on/off
     const handleKeyDown = (e) => {
-      if (e.code === 'Space') {
-        e.preventDefault(); // Prevent scrolling
-        interruptAndListen();
+      if (e.code === 'Space' && !isHelpOpen) {
+        e.preventDefault();
+
+        // If already listening, stop
+        if (mode === 'LISTENING') {
+          if (recognitionRef.current) {
+            try {
+              recognitionRef.current.stop();
+              setMode('IDLE');
+              setBgmVolume(0.3); // Reset BGM volume
+            } catch (err) {
+              console.error('Error stopping recognition:', err);
+            }
+          }
+        } else {
+          // Otherwise, start listening
+          interruptAndListen();
+        }
+      }
+
+      if (e.key === '?' && !isHelpOpen) {
+        e.preventDefault();
+        setIsHelpOpen(true);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [playBgm, setBgmVolume, isHelpOpen, mode]);
 
-  // Scroll to bottom when history changes
-  useEffect(() => {
-    if (canvasRef.current) {
-      canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
-    }
-  }, [history]);
-
-  // --- 2. INTERRUPT & LISTEN LOGIC ---
   const interruptAndListen = () => {
-    // 1. Kill Audio Immediately
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
+    stopVoice();
 
-    // 2. Start Listening
     if (recognitionRef.current) {
       try {
-        // If already listening, restart. If idle, start.
-        recognitionRef.current.stop(); 
-        setTimeout(() => recognitionRef.current.start(), 100); 
-      } catch (e) { 
-        console.error(e); 
-      }
+        recognitionRef.current.stop();
+        setTimeout(() => recognitionRef.current.start(), 100);
+      } catch (e) { console.error(e); }
     }
   };
 
-  // --- 3. BACKEND COMMUNICATION ---
+  const handleQuickAction = async (action) => {
+    const commandMap = {
+      'portfolio': 'Show my holdings',
+      'funds': 'Show my funds',
+      'positions': 'Show my positions'
+    };
+
+    const command = commandMap[action];
+    if (command) {
+      setMode('PROCESSING');
+      await handleCommand(command);
+    }
+  };
+
   const handleCommand = async (text) => {
     try {
-      // Optimistic Update: Add user query to history immediately (optional)
-      // For now, we wait for server to decide what card to show
-
-      const response = await axios.post('http://localhost:8000/chat', { message: text });
+      setIsConnected(true); // Connection successful
+      const payload = { message: text, context: serverContext };
+      const response = await axios.post('http://localhost:8000/chat', payload);
       const data = response.data;
-      
+      const intent = data.data?.intent;
+
+      // Update Context
+      if (data.data && (data.data.status === "WAITING_FOR_SLOT" || data.data.pending_order)) {
+        setServerContext(data.data);
+      } else {
+        setServerContext({});
+      }
+
       setMode("SPEAKING");
 
-      // --- CARD CREATION LOGIC ---
-      let newCard = {
-        id: Date.now(),
-        type: 'TEXT', // Default
-        title: 'Assistant',
-        content: data.text,
-        sub: ''
-      };
+      // --- AUDIO & UI LOGIC ---
+      let newItem = { id: Date.now(), type: 'TEXT', content: data.text };
 
-      const intent = data.data?.intent;
-      
-      if (intent === 'CHECK_PRICE' && data.data?.price) {
-        newCard = {
-          ...newCard,
-          type: 'PRICE',
-          title: data.data.symbol || 'Stock Price',
-          content: `₹${data.data.price}`,
-          sub: 'Live Market Data'
-        };
-      } 
-      else if (intent === 'GET_FUNDS') {
-        const amount = data.text.match(/[\d,]+\.\d{2}/)?.[0] || "---";
-        newCard = {
-          ...newCard,
-          type: 'FUNDS',
-          title: 'Wallet Balance',
-          content: `₹${amount}`,
-          sub: 'Available Margin'
-        };
-      }
-      else if (intent === 'MARKET_NEWS') {
-        newCard = {
-          ...newCard,
+      // 1. NEWS LOGIC
+      if (intent === 'MARKET_NEWS') {
+        playBgm('NEWS');
+        newItem = {
           type: 'NEWS',
-          title: 'Market Intelligence',
-          content: 'News Summary',
-          sub: data.text.replace("Here is the latest news for", "Analysis:")
+          content: data.text.replace("Here is the latest news for", "")
         };
       }
 
-      // Add to Canvas History
-      setHistory(prev => [...prev, newCard]);
+      // 2. PRICE LOGIC
+      else if (intent === 'CHECK_PRICE' && data.data?.price) {
+        const isPositive = Math.random() > 0.5;
+        playSfx(isPositive ? 'success2.mp3' : 'failure.mp3');
 
-      // Play Audio
+        newItem = {
+          type: 'PRICE',
+          data: {
+            symbol: data.data.symbol,
+            price: data.data.price,
+            change: isPositive ? 'up' : 'down'
+          }
+        };
+      }
+
+      // 3. ORDER LOGIC
+      else if (intent === 'ORDER_RESULT') {
+        playSfx('confirm.mp3');
+        // Show toast notification
+        if (data.text.toLowerCase().includes('successfully') || data.text.toLowerCase().includes('placed')) {
+          toast.success(data.text);
+        } else if (data.text.toLowerCase().includes('rejected') || data.text.toLowerCase().includes('failed')) {
+          toast.error(data.text);
+        } else if (data.text.toLowerCase().includes('insufficient')) {
+          toast.warning(data.text);
+        }
+      }
+
+      // 4. FUNDS LOGIC
+      else if (intent === 'GET_FUNDS') {
+        playSfx('success.mp3');
+        newItem = {
+          type: 'FUNDS',
+          content: data.text.match(/[\d,]+\.\d{2}/)?.[0] || "---"
+        };
+      }
+
+      // 5. HOLDINGS LOGIC
+      else if (intent === 'GET_HOLDINGS' || data.data?.type === 'HOLDINGS') {
+        playSfx('success.mp3');
+        newItem = {
+          type: 'HOLDINGS',
+          content: data.text
+        };
+      }
+
+      // 6. POSITIONS LOGIC
+      else if (intent === 'GET_POSITIONS' || data.data?.type === 'POSITIONS') {
+        playSfx('success.mp3');
+        newItem = {
+          type: 'POSITIONS',
+          content: data.text
+        };
+      }
+
+      // Add to History
+      const isSystemMessage = data.text.toLowerCase().includes("system error") ||
+        (data.data?.status === "WAITING_FOR_SLOT");
+
+      if (!isSystemMessage) addToHistory(newItem);
+
+      // Play Voice
       if (data.audio_base64) {
-        audioRef.current.src = `data:audio/mp3;base64,${data.audio_base64}`;
-        audioRef.current.play()
-          .then(() => console.log("Playing"))
-          .catch(e => console.error("Playback failed", e));
-        
-        audioRef.current.onended = () => setMode("IDLE");
+        playVoice(data.audio_base64, () => {
+          setMode("IDLE");
+          // If news, revert to ambient
+          if (intent === 'MARKET_NEWS') playBgm('AMBIENT');
+        });
       } else {
-        setTimeout(() => setMode("IDLE"), 2000);
+        setMode("IDLE");
+        setBgmVolume(0.3);
       }
 
     } catch (error) {
       setMode("IDLE");
+      setIsConnected(false); // Connection failed
       console.error(error);
     }
   };
 
+  const addToHistory = (newItem) => {
+    setHistory(prev => {
+      const lastItem = prev[prev.length - 1];
+      if (newItem.type === 'PRICE' && lastItem && lastItem.type === 'PRICE_CLUSTER') {
+        const updatedCluster = { ...lastItem, data: [...lastItem.data, newItem.data] };
+        return [...prev.slice(0, -1), updatedCluster];
+      }
+      if (newItem.type === 'PRICE') {
+        return [...prev, { id: Date.now(), type: 'PRICE_CLUSTER', title: 'Market Watch', data: [newItem.data] }];
+      }
+      return [...prev, newItem];
+    });
+  };
+
   return (
-    <>
-      {/* --- 1. THE CANVAS (Persistent History) --- */}
-      <div className="canvas-container" ref={canvasRef}>
-        <div className="card-grid">
-          <AnimatePresence>
-            {history.map((card) => (
-              <motion.div
-                key={card.id}
-                className="notion-card"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4 }}
-              >
-                <div className="card-header">
-                  {card.type === 'PRICE' ? <TrendingUp size={16}/> : 
-                   card.type === 'FUNDS' ? <DollarSign size={16}/> :
-                   card.type === 'NEWS' ? <FileText size={16}/> : <Activity size={16}/>}
-                  <span>{card.title}</span>
-                </div>
-                
-                {/* Content rendering based on type */}
-                <div className="card-content">
-                  {card.type === 'NEWS' ? 
-                    <div style={{fontSize: '1rem', lineHeight: '1.5'}}>{card.sub}</div> 
-                    : card.content
-                  }
-                </div>
-                
-                {card.type !== 'NEWS' && <div className="card-sub">{card.sub}</div>}
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      </div>
+    <ErrorBoundary>
+      <Header isConnected={isConnected} />
+      <HistoryFeed history={history} />
+      <InteractionIsland
+        mode={mode}
+        transcript={transcript}
+        onInterrupt={interruptAndListen}
+      />
+      <QuickActions
+        onOpenHelp={() => setIsHelpOpen(true)}
+        onTriggerAction={handleQuickAction}
+      />
+      <CommandPalette isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+    </ErrorBoundary>
+  );
+}
 
-      {/* --- 2. THE TRANSCRIPT PILL --- */}
-      <AnimatePresence>
-        {(mode !== 'IDLE') && (
-          <motion.div 
-            className="transcript-overlay"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-          >
-            {mode === 'LISTENING' ? "Listening..." : 
-             mode === 'PROCESSING' ? "Thinking..." : transcript}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* --- 3. FLOATING DRAGGABLE BLOB --- */}
-      <motion.div 
-        className="blob-wrapper"
-        drag
-        dragMomentum={false} // Stops sliding after release
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
-        onClick={interruptAndListen} // Click = Interrupt & Listen
-      >
-        <motion.div 
-          className="obsidian-orb"
-          animate={{
-            boxShadow: mode === 'LISTENING' 
-              ? "0px 0px 40px rgba(0,0,0,0.4)" 
-              : "0px 10px 30px rgba(0,0,0,0.3)"
-          }}
-        >
-          {/* Inner Pulse */}
-          {mode === 'LISTENING' && (
-            <motion.div 
-              className="ripple"
-              style={{ width: '100%', height: '100%' }}
-              animate={{ scale: [1, 2], opacity: [0.5, 0] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-            />
-          )}
-          
-          <Mic color="white" size={32} opacity={mode === 'LISTENING' ? 1 : 0.5} />
-        </motion.div>
-      </motion.div>
-    </>
+// Wrap with ToastProvider for global toast access
+function App() {
+  return (
+    <ToastProvider>
+      <VoiceTraderApp />
+    </ToastProvider>
   );
 }
 

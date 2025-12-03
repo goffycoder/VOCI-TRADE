@@ -1,6 +1,7 @@
 import os
 import wave
 import pyaudio
+import re  # 
 from google.cloud import speech
 from elevenlabs import ElevenLabs, stream
 
@@ -29,17 +30,44 @@ except Exception as e:
 #  SECTION A: WEB SERVER FUNCTIONS (For server.py)
 # ==========================================
 
+def clean_text_for_speech(text: str) -> str:
+    """
+    Removes Markdown symbols (*, #, -) and weird spacing 
+    so the TTS voice reads it naturally.
+    """
+    if not text: return ""
+    
+    # 1. Remove Markdown asterisks (**) and hashes (#)
+    clean = re.sub(r'[*#]', '', text)
+    
+    # 2. Replace bullet points with pauses
+    clean = clean.replace("\n-", ". ").replace("- ", "")
+    
+    # 3. Collapse multiple newlines/spaces into a single space
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    
+    return clean
+
 def generate_audio_bytes(text: str) -> bytes:
     """
     Generates audio bytes using ElevenLabs.
     Returns raw bytes to be sent to the Frontend (Browser).
     """
-    print(f"[TTS]: Generating audio for: '{text}'")
+    # --- CHANGE START: Clean the text before sending ---
+    speakable_text = clean_text_for_speech(text)
+    
+    print(f"[TTS]: Raw Input: '{text}...'") 
+    print(f"[TTS]: Generating audio for: '{speakable_text}...'")
+    # --- CHANGE END ---
+
+    if not speakable_text:
+        return b""
+
     try:
         # Convert text to audio generator
         audio_generator = eleven_client.text_to_speech.convert(
-            text=text,
-            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel
+            text=speakable_text, # Use the cleaned text
+            voice_id="UgBBYS2sOqTuMpoF3BR0",  # Rachel
             model_id="eleven_multilingual_v2"
         )
         # Consume generator to get full byte string
@@ -81,10 +109,12 @@ def say_text(text: str):
     """
     Speaks text locally on the server/laptop speakers.
     """
-    print(f"[Ledger]: {text}")
+    clean_val = clean_text_for_speech(text) # Clean here too
+    print(f"[Ledger]: {clean_val}")
+    
     try:
         audio_stream = eleven_client.text_to_speech.convert(
-            text=text,
+            text=clean_val,
             voice_id="21m00Tcm4TlvDq8ikWAM",
             model_id="eleven_multilingual_v2"
         )

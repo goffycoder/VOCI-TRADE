@@ -134,3 +134,14 @@ class StockFinder:
         # --- NO MATCH FOUND ---
         print(f"[StockFinder]: ✗ No match found for '{spoken_symbol}'")
         return []
+
+    def find_stock(self, spoken_symbol: str) -> dict | None:
+        """
+        Helper that returns the best single match as a dictionary.
+        Format: {"symbol": "RELIANCE", "security_id": "12345"}
+        """
+        results = self.find_security_id(spoken_symbol)
+        if results:
+            sec_id, symbol = results[0]
+            return {"symbol": symbol, "security_id": sec_id}
+        return None

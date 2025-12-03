@@ -1,7 +1,7 @@
 # --- Standard Imports ---
 import pvporcupine
 import pyaudio
-import struct
+import structgit 
 import json
 import os
 import time
