@@ -13,7 +13,7 @@ class DhanHandler:
         self.access_token = access_token
         self.base_url = "https://api.dhan.co/v2"
         
-        # Headers for raw API calls (needed for Super Orders)
+        # Headers for raw API calls
         self.headers = {
             "access-token": access_token,
             "client-id": client_id,
@@ -66,7 +66,7 @@ class DhanHandler:
             print(f"[DhanHandler]: Error fetching funds: {e}")
             return None
 
-    # --- PHASE 2: PORTFOLIO ---
+    # --- PHASE 2: PORTFOLIO & POSITIONS ---
     def get_holdings_summary(self):
         """Fetches long-term holdings summary."""
         try:
@@ -92,28 +92,88 @@ class DhanHandler:
             return "I couldn't fetch your holdings."
         
     def get_positions_summary(self):
-        """Fetches intraday open positions."""
+        """
+        Fetches Net P&L (Realized + Unrealized) and active positions.
+        """
         try:
             url = f"{self.base_url}/positions"
             response = requests.get(url, headers=self.headers)
             positions = response.json()
             
-            total_pl = 0.0
-            open_positions = []
-            
+            total_realized = 0.0
+            total_unrealized = 0.0
+            active_pos = []
+
             for pos in positions:
-                pl = pos.get("unrealizedProfit", 0.0)
-                total_pl += pl
-                if pos.get("netQty", 0) != 0:
-                    open_positions.append(f"{pos['tradingSymbol']} ({pl:.2f})")
-            
+                # 1. Sum up P&L
+                total_realized += pos.get("realizedProfit", 0.0)
+                total_unrealized += pos.get("unrealizedProfit", 0.0)
+                
+                # 2. Track Active Positions (Net Qty != 0)
+                net_qty = pos.get("netQty", 0)
+                if net_qty != 0:
+                    active_pos.append(f"{pos['tradingSymbol']} ({pos.get('unrealizedProfit', 0.0):.2f})")
+
+            total_pl = total_realized + total_unrealized
             status = "profit" if total_pl >= 0 else "loss"
-            pos_text = ", ".join(open_positions) if open_positions else "no open positions"
             
-            return f"Total intraday P&L is a {status} of {abs(total_pl):.2f} rupees. Active: {pos_text}."
+            # Construct message
+            pos_text = ", ".join(active_pos) if active_pos else "no active positions"
+            
+            return (f"Total P&L is a {status} of {abs(total_pl):.2f} rupees "
+                    f"(Realized: {total_realized:.2f}, Open: {total_unrealized:.2f}). "
+                    f"Active: {pos_text}.")
         except Exception as e:
             print(f"[DhanHandler]: Error fetching positions: {e}")
             return "I couldn't fetch your positions."
+
+    # --- NEW: PENDING ORDERS ---
+    def get_pending_orders(self):
+        """Fetches orders that are currently PENDING or in TRANSIT."""
+        try:
+            url = f"{self.base_url}/orders"
+            response = requests.get(url, headers=self.headers)
+            orders = response.json()
+            
+            if isinstance(orders, dict) and "data" in orders:
+                orders = orders["data"]
+            
+            pending = []
+            for o in orders:
+                if o['orderStatus'] in ['PENDING', 'TRANSIT', 'APPROVAL_PENDING']:
+                    pending.append(f"{o['quantity']} {o['tradingSymbol']} at {o['price']}")
+            
+            if not pending: 
+                return "You have no pending orders."
+            return "Pending Orders: " + ", ".join(pending)
+        except Exception as e:
+            print(f"[DhanHandler]: Error fetching orders: {e}")
+            return f"Error fetching orders: {e}"
+
+    # --- NEW: MARGIN CALCULATOR ---
+    def get_margin_requirement(self, security_id, quantity, transaction_type="BUY", product_type="CNC"):
+        """Checks required margin for a specific trade."""
+        try:
+            url = f"{self.base_url}/margincalculator"
+            payload = {
+                "dhanClientId": self.client_id,
+                "exchangeSegment": "NSE_EQ",
+                "transactionType": transaction_type.upper(),
+                "quantity": int(quantity),
+                "productType": product_type.upper(),
+                "securityId": str(security_id),
+                "price": 0.0 # Market price calculation
+            }
+            response = requests.post(url, headers=self.headers, json=payload)
+            data = response.json()
+            
+            total_margin = data.get("totalMargin")
+            if total_margin:
+                return float(total_margin)
+            return None
+        except Exception as e:
+            print(f"[DhanHandler]: Margin Calc Error: {e}")
+            return None
 
     # --- PHASE 3: LIVE MARKET DATA ---
     def get_live_price(self, security_id, exchange_segment="NSE_EQ"):
@@ -147,6 +207,7 @@ class DhanHandler:
             if not order_details.get("security_id"): return "Security ID is missing."
 
             # 2. Check funds before proceeding (Buying only)
+            # Note: Server logic often handles MAX calculation, but this is a final safety check
             if order_details["action"].upper() == "BUY":
                 funds = self.get_funds()
                 if funds is not None:
@@ -158,7 +219,7 @@ class DhanHandler:
                     
                     estimated_cost = price * int(order_details["quantity"])
                     
-                    # Buffer: Ensure we have slightly more than the estimated cost
+                    # Buffer: Ensure we have slightly more than the estimated cost (unless using margins)
                     if estimated_cost > funds:
                         return f"Insufficient funds. Required approx {estimated_cost:.2f}, but you have {funds:.2f}."
 
@@ -178,13 +239,15 @@ class DhanHandler:
             # Determine Price & Type
             # If MARKET, price sent to API must be 0
             is_limit = od.get("order_type") == "LIMIT"
-            # Safe float conversion: handles None or 0.0
             price_arg = float(od.get("price") or 0.0) if is_limit else 0.0
             
             # Determine AMO Status
             is_open = self.is_market_open()
             is_amo = not is_open  # If market closed, it's an AMO
             
+            # Default to INTRADAY if not specified
+            product = od.get("product_type", "INTRADAY").upper()
+
             print(f"[Dhan]: Placing Normal Order. Type: {od.get('order_type')}, Price: {price_arg}, AMO: {is_amo}")
 
             response = self.dhan.place_order(
@@ -193,7 +256,7 @@ class DhanHandler:
                 transaction_type=od["action"].upper(),
                 quantity=int(od["quantity"]),
                 order_type=od.get("order_type", "MARKET"),
-                product_type="INTRADAY",
+                product_type=product,
                 price=price_arg,
                 validity="DAY",
                 after_market_order=is_amo
@@ -214,7 +277,6 @@ class DhanHandler:
             url = f"{self.base_url}/super/orders"
             
             # Construct Payload per Documentation
-            # FIX: We use 'or 0.0' to handle cases where keys exist but value is None (from Gemini)
             payload = {
                 "dhanClientId": self.client_id,
                 "correlationId": f"voice_{int(datetime.datetime.now().timestamp())}",
@@ -241,25 +303,43 @@ class DhanHandler:
             print(f"[Dhan]: Super Order Error: {e}")
             return f"Failed to place super order: {e}"
 
-    def calculate_max_quantity(self, security_id, price):
+    def square_off_all(self):
         """
-        Calculates max shares buyable with available balance.
+        Fetches all open positions and places MARKET SELL orders for them.
         """
         try:
-            funds = self.get_funds() # Returns float
-            if not funds or funds <= 0:
-                return 0
+            url = f"{self.base_url}/positions"
+            response = requests.get(url, headers=self.headers)
+            positions = response.json()
             
-            # Apply a 5% safety buffer for brokerage/fluctuations
-            safe_funds = funds * 0.95
+            results = []
             
-            if price <= 0: return 0
+            for pos in positions:
+                # We only care about open positions (netQty != 0)
+                net_qty = pos.get("netQty", 0)
+                
+                if net_qty != 0:
+                    # If Net > 0 (Long), we Sell. If Net < 0 (Short), we Buy.
+                    action = "SELL" if net_qty > 0 else "BUY"
+                    
+                    self.dhan.place_order(
+                        security_id=pos["securityId"],
+                        exchange_segment=pos["exchangeSegment"],
+                        transaction_type=action,
+                        quantity=abs(net_qty),
+                        order_type="MARKET",
+                        product_type=pos["productType"],
+                        price=0.0, # Required for Dhan API even for Market orders
+                        validity="DAY"
+                    )
+                    results.append(f"Closed {pos['tradingSymbol']}")
             
-            quantity = int(safe_funds / price)
-            return quantity
+            if not results:
+                return "No open positions to close."
+            
+            return "Squared off: " + ", ".join(results)
         except Exception as e:
-            print(f"[Dhan]: Error calculating max qty: {e}")
-            return 0
+            return f"Error squaring off: {e}"
 
     # --- RESPONSE PARSER ---
     def _parse_dhan_response(self, response: dict, details: dict, is_amo: bool, is_super: bool) -> str:

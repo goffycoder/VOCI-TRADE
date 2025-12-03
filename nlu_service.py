@@ -159,9 +159,11 @@ TASK: Classify the user command into one of these SPECIFIC intents:
 2. PLACE_ORDER: User explicitly wants to BUY, SELL, SQUARE OFF, or CLOSE positions.
 3. GET_HOLDINGS: User wants to see their portfolio, holdings, or long-term investments.
 4. GET_POSITIONS: User wants to see intraday/open positions or P&L.
-5. GET_FUNDS: User asks about balance, funds, or money available.
-6. CHECK_PRICE: User asks for the price/quote of a specific stock.
-7. CONVERSATIONAL: EVERYTHING ELSE. Includes:
+5. GET_ORDERS: User wants to see PENDING orders or non-executed orders.
+6. CHECK_MARGIN: User asks "How much margin/funds/money needed for X?".
+7. GET_FUNDS: User asks about balance, funds, or money available.
+8. CHECK_PRICE: User asks for the price/quote of a specific stock.
+9. CONVERSATIONAL: EVERYTHING ELSE. Includes:
    - Educational questions ("What is an index?", "How do options work?")
    - General market discussions ("Why is the market down?")
    - Greetings ("Hello")
@@ -175,10 +177,11 @@ EXAMPLES:
 "Buy 10 Reliance" -> PLACE_ORDER
 "What is the price of Tata?" -> CHECK_PRICE
 "Show my portfolio" -> GET_HOLDINGS
+"Show my pending orders" -> GET_ORDERS
+"How much margin for Reliance?" -> CHECK_MARGIN
 "I want to learn about the stock market" -> CONVERSATIONAL
 "What is an index?" -> CONVERSATIONAL
 "Hello" -> CONVERSATIONAL
-"Tell me a joke" -> CONVERSATIONAL
 
 USER COMMAND: "{transcription}"
 
@@ -190,7 +193,10 @@ INTENT:
         # Clean potential markdown
         intent = intent.replace("```", "").strip()
         
-        valid_intents = ["MARKET_NEWS", "PLACE_ORDER", "GET_HOLDINGS", "GET_POSITIONS", "GET_FUNDS", "CHECK_PRICE", "CONVERSATIONAL"]
+        valid_intents = [
+            "MARKET_NEWS", "PLACE_ORDER", "GET_HOLDINGS", "GET_POSITIONS", 
+            "GET_FUNDS", "CHECK_PRICE", "CONVERSATIONAL", "GET_ORDERS", "CHECK_MARGIN"
+        ]
         
         if intent in valid_intents:
             return intent
