@@ -67,7 +67,7 @@ def generate_audio_bytes(text: str) -> bytes:
         # Convert text to audio generator
         audio_generator = eleven_client.text_to_speech.convert(
             text=speakable_text, # Use the cleaned text
-            voice_id="UgBBYS2sOqTuMpoF3BR0",  # Rachel
+            voice_id="NDTYOmYEjbDIVCKB35i3",  # Paige
             model_id="eleven_multilingual_v2"
         )
         # Consume generator to get full byte string
