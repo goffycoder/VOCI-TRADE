@@ -152,7 +152,7 @@ class DhanHandler:
                 if funds is not None:
                     # Determine estimated price
                     if order_details.get("order_type") == "LIMIT":
-                        price = float(order_details.get("price", 0.0))
+                        price = float(order_details.get("price") or 0.0)
                     else:
                         price = float(self.get_live_price(order_details["security_id"]) or 0.0)
                     
@@ -178,7 +178,8 @@ class DhanHandler:
             # Determine Price & Type
             # If MARKET, price sent to API must be 0
             is_limit = od.get("order_type") == "LIMIT"
-            price_arg = float(od.get("price", 0.0)) if is_limit else 0.0
+            # Safe float conversion: handles None or 0.0
+            price_arg = float(od.get("price") or 0.0) if is_limit else 0.0
             
             # Determine AMO Status
             is_open = self.is_market_open()
@@ -213,7 +214,7 @@ class DhanHandler:
             url = f"{self.base_url}/super/orders"
             
             # Construct Payload per Documentation
-            # Note: Super Orders usually don't accept 'afterMarketOrder' flag directly in same way
+            # FIX: We use 'or 0.0' to handle cases where keys exist but value is None (from Gemini)
             payload = {
                 "dhanClientId": self.client_id,
                 "correlationId": f"voice_{int(datetime.datetime.now().timestamp())}",
@@ -223,10 +224,10 @@ class DhanHandler:
                 "orderType": "LIMIT",      # Super orders are almost always LIMIT
                 "securityId": str(od["security_id"]),
                 "quantity": int(od["quantity"]),
-                "price": float(od.get("price", 0.0)),
-                "targetPrice": float(od["target_price"]),
-                "stopLossPrice": float(od["stop_loss_price"]),
-                "trailingJump": float(od.get("trailing_jump", 0.0))
+                "price": float(od.get("price") or 0.0),
+                "targetPrice": float(od.get("target_price") or 0.0),
+                "stopLossPrice": float(od.get("stop_loss_price") or 0.0),
+                "trailingJump": float(od.get("trailing_jump") or 0.0)
             }
 
             print(f"[Dhan]: Placing SUPER Order: {payload}")
@@ -240,6 +241,26 @@ class DhanHandler:
             print(f"[Dhan]: Super Order Error: {e}")
             return f"Failed to place super order: {e}"
 
+    def calculate_max_quantity(self, security_id, price):
+        """
+        Calculates max shares buyable with available balance.
+        """
+        try:
+            funds = self.get_funds() # Returns float
+            if not funds or funds <= 0:
+                return 0
+            
+            # Apply a 5% safety buffer for brokerage/fluctuations
+            safe_funds = funds * 0.95
+            
+            if price <= 0: return 0
+            
+            quantity = int(safe_funds / price)
+            return quantity
+        except Exception as e:
+            print(f"[Dhan]: Error calculating max qty: {e}")
+            return 0
+
     # --- RESPONSE PARSER ---
     def _parse_dhan_response(self, response: dict, details: dict, is_amo: bool, is_super: bool) -> str:
         status = response.get("status", "").lower()
@@ -248,7 +269,7 @@ class DhanHandler:
         # Get stock name for clean output
         sym = details.get("symbol_name", details.get("symbol", "the stock"))
 
-        if status == "success" or order_status in ["PENDING", "TRANSIT", "TRADED"]:
+        if status == "success" or order_status in ["PENDING", "TRANSIT", "TRADED", "OPN", "CONFIRMED"]:
             if is_super:
                 return f"Super Order for {sym} placed successfully."
             elif is_amo:
@@ -259,7 +280,13 @@ class DhanHandler:
         elif status == "failure" or order_status == "REJECTED":
             # Extract error message
             remarks = response.get("remarks", {})
-            error_msg = remarks.get("error_message", "Unknown reason")
+            error_msg = "Unknown reason"
+            
+            if isinstance(remarks, dict):
+                error_msg = remarks.get("error_message", "Unknown reason")
+            elif isinstance(remarks, str):
+                error_msg = remarks
+            
             return f"The order was rejected by the broker. Reason: {error_msg}"
         
         else:

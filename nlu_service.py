@@ -26,6 +26,21 @@ def get_order_intent_gemini(transcription: str) -> dict | None:
 You are an expert NLU system for a stock trading voice assistant.
 
 TASK: Extract trading order details from the user's spoken command.
+1. If single order: Return the object directly.
+2. If multiple orders: Return {{ "orders": [order1, order2] }}
+3. If "Close all positions" / "Square off": Return {{ "action": "SQUARE_OFF_ALL" }}
+
+SPECIAL RULES:
+- "quantity": If user says "max", "all my funds", "full capital" -> set "quantity": "MAX"
+- "quantity": If user says "sell all shares of X" -> set "quantity": "ALL"
+- "action": "SQUARE_OFF_ALL" is only for "Sell everything", "Close all positions".
+
+EXAMPLES:
+"Buy max shares of Reliance" -> {{ "action": "BUY", "quantity": "MAX", "symbol": "Reliance", "order_type": "MARKET" }}
+"Buy 10 TCS and Sell 5 Infosys" -> {{ "orders": [{{ "action": "BUY", "quantity": 10, "symbol": "TCS" }}, {{ "action": "SELL", "quantity": 5, "symbol": "Infosys" }}] }}
+"Close all my positions" -> {{ "action": "SQUARE_OFF_ALL" }}
+
+USER COMMAND: "{transcription}"
 
 OUTPUT FORMAT: Valid JSON object with these fields:
 {{
@@ -133,33 +148,37 @@ def translate_if_needed(text: str) -> str:
 
 def get_general_intent(transcription: str) -> str:
     """
-    Determines the general intent of a user's command using Gemini.
+    Determines the intent. Defaults to CONVERSATIONAL if no specific trading action is found.
     """
     prompt = f"""
-You are an NLU system for a stock trading voice assistant.
-Your task is to classify the user's command into one of the following intents:
-- MARKET_NEWS: User wants to know about market news, headlines, or general market updates.
-- PLACE_ORDER: User wants to buy or sell stocks.
-- GET_HOLDINGS: User wants to see their current stock holdings.
-- GET_POSITIONS: User wants to see their open trading positions.
-- GET_FUNDS: User wants to know their available funds or balance.
-- CHECK_PRICE: User wants to know the price of a specific stock.
-- UNKNOWN: The intent cannot be determined from the given command.
+You are an NLU router for a stock trading voice assistant.
+
+TASK: Classify the user command into one of these SPECIFIC intents:
+
+1. MARKET_NEWS: User asks for news, headlines, updates on specific stocks or the market.
+2. PLACE_ORDER: User explicitly wants to BUY, SELL, SQUARE OFF, or CLOSE positions.
+3. GET_HOLDINGS: User wants to see their portfolio, holdings, or long-term investments.
+4. GET_POSITIONS: User wants to see intraday/open positions or P&L.
+5. GET_FUNDS: User asks about balance, funds, or money available.
+6. CHECK_PRICE: User asks for the price/quote of a specific stock.
+7. CONVERSATIONAL: EVERYTHING ELSE. Includes:
+   - Educational questions ("What is an index?", "How do options work?")
+   - General market discussions ("Why is the market down?")
+   - Greetings ("Hello")
+   - Unclear or vague inputs.
 
 RULES:
-- Be strict with classification. If unsure, classify as UNKNOWN.
+- Do NOT output "UNKNOWN". If it doesn't fit intents 1-6, it is CONVERSATIONAL.
 - Output ONLY the intent name in uppercase.
 
 EXAMPLES:
-"What's the news today?" -> MARKET_NEWS
-"Buy 10 shares of Reliance" -> PLACE_ORDER
-"Sell Tata Motors" -> PLACE_ORDER
-"Show me my portfolio" -> GET_HOLDINGS
-"What are my current positions?" -> GET_POSITIONS
-"How much money do I have?" -> GET_FUNDS
-"What is the price of HDFC?" -> CHECK_PRICE
-"Tell me a joke" -> UNKNOWN
-"Hello" -> UNKNOWN
+"Buy 10 Reliance" -> PLACE_ORDER
+"What is the price of Tata?" -> CHECK_PRICE
+"Show my portfolio" -> GET_HOLDINGS
+"I want to learn about the stock market" -> CONVERSATIONAL
+"What is an index?" -> CONVERSATIONAL
+"Hello" -> CONVERSATIONAL
+"Tell me a joke" -> CONVERSATIONAL
 
 USER COMMAND: "{transcription}"
 
@@ -168,10 +187,17 @@ INTENT:
     try:
         response = gemini_model.generate_content(prompt)
         intent = response.text.strip().upper()
-        valid_intents = ["MARKET_NEWS", "PLACE_ORDER", "GET_HOLDINGS", "GET_POSITIONS", "GET_FUNDS", "CHECK_PRICE", "UNKNOWN"]
-        return intent if intent in valid_intents else "UNKNOWN"
+        # Clean potential markdown
+        intent = intent.replace("```", "").strip()
+        
+        valid_intents = ["MARKET_NEWS", "PLACE_ORDER", "GET_HOLDINGS", "GET_POSITIONS", "GET_FUNDS", "CHECK_PRICE", "CONVERSATIONAL"]
+        
+        if intent in valid_intents:
+            return intent
+        else:
+            return "CONVERSATIONAL" # Fallback to chat instead of error
     except Exception:
-        return "UNKNOWN"
+        return "CONVERSATIONAL" # Fallback on error
 
 def analyze_news_sentiment(headlines: list[str]) -> str:
     """
@@ -196,80 +222,58 @@ def analyze_news_sentiment(headlines: list[str]) -> str:
 
 def fill_missing_slot_gemini(pending_order: dict, follow_up_answer: str, missing_slot: str) -> dict | None:
     """
-    Uses Gemini to extract a single missing piece of information.
+    Intelligently merges new information from the user into the pending order.
+    It extracts ANY order details found in the answer, not just the missing slot.
+    Also handles STT corrections (e.g., "Cell" -> "SELL").
     """
     prompt = f"""
-You are a slot-filling assistant for a stock trading system.
+You are a smart context-updater for a trading bot.
 
-CONTEXT: User's partial order:
+CURRENT ORDER STATE:
 {json.dumps(pending_order, indent=2)}
 
-MISSING INFORMATION: "{missing_slot}"
+SYSTEM ASKED FOR: "{missing_slot}"
+USER ANSWERED: "{follow_up_answer}"
 
-USER'S ANSWER: "{follow_up_answer}"
+TASK: 
+1. Update the order with information provided in the "USER ANSWER".
+2. Extract NOT ONLY the missing slot, but ANY other order details (Action, Quantity, Symbol, Price) provided.
+3. Fix phonetic typos (e.g., "Cell" -> "SELL", "Eye" -> "BUY", "share" -> quantity).
 
-TASK: Extract ONLY the "{missing_slot}" value from the user's answer.
+RULES:
+- Update "action" if user says "buy", "sell", "short", "purchase", "cell" (typo).
+- Update "quantity" if user mentions numbers or "shares".
+- Update "symbol" if user names a stock.
+- Keep existing values in CURRENT ORDER STATE unless the user explicitly overrides them.
 
-EXTRACTION RULES:
-- If missing_slot is "action": Extract "BUY" or "SELL"
-  Examples: "buy" → "BUY", "sell it" → "SELL", "purchase" → "BUY"
-  
-- If missing_slot is "quantity": Extract integer
-  Examples: "five" → 5, "100 shares" → 100, "fifty" → 50
-  
-- If missing_slot is "symbol": Extract stock name exactly as spoken
-  Examples: "reliance" → "reliance", "tata motors" → "tata motors"
-  
-- If missing_slot is "price": Extract float
-  Examples: "1500" → 1500.0, "at 2000" → 2000.0
-
-OUTPUT FORMAT: Valid JSON with ONLY the extracted field:
-{{
-  "{missing_slot}": "EXTRACTED_VALUE"
-}}
+OUTPUT FORMAT:
+Return a JSON object containing the NEWLY EXTRACTED or UPDATED fields only.
 
 EXAMPLES:
-Missing: "action", Answer: "I want to buy" → {{"action": "BUY"}}
-Missing: "quantity", Answer: "fifty shares" → {{"quantity": 50}}
-Missing: "symbol", Answer: "tata motors" → {{"symbol": "tata motors"}}
+1. Context: {{ "action": "BUY" }}, User: "Reliance", Output: {{ "symbol": "Reliance" }}
+2. Context: {{ }}, User: "Cell 10 shares of Tata", Output: {{ "action": "SELL", "quantity": 10, "symbol": "Tata" }}
+3. Context: {{ "symbol": "TCS" }}, User: "Buy 5", Output: {{ "action": "BUY", "quantity": 5 }}
 
 JSON OUTPUT:
 """
     
-    print(f"[NLU Slot-Fill]: Extracting '{missing_slot}' from: '{follow_up_answer}'")
-    response = None
+    print(f"[NLU Context Update]: Analyzing answer: '{follow_up_answer}'")
     
     try:
         response = gemini_model.generate_content(prompt)
         json_string = response.text.strip()
         
-        # Remove markdown code blocks
-        if json_string.startswith("```json"):
-            json_string = json_string[7:]
-        if json_string.startswith("```"):
-            json_string = json_string[3:]
-        if json_string.endswith("```"):
-            json_string = json_string[:-3]
+        # Clean Markdown
+        if json_string.startswith("```json"): json_string = json_string[7:]
+        if json_string.startswith("```"): json_string = json_string[3:]
+        if json_string.endswith("```"): json_string = json_string[:-3]
         
-        json_string = json_string.strip()
-        
-        result = json.loads(json_string)
-        
-        if missing_slot in result and result[missing_slot] is not None:
-            print(f"[NLU Slot-Fill]: ✓ Extracted {missing_slot}={result[missing_slot]}")
-            return result
-        else:
-            print(f"[NLU Slot-Fill]: ✗ Failed to extract '{missing_slot}'")
-            return None
+        result = json.loads(json_string.strip())
+        print(f"[NLU Context Update]: ✓ Merged Data: {result}")
+        return result
             
-    except json.JSONDecodeError as e:
-        response_text = response.text if response else "No response"
-        print(f"[NLU Slot-Fill]: ✗ JSON Parse Error: {e}")
-        print(f"[NLU Slot-Fill]: Raw response: {response_text}")
-        return None
     except Exception as e:
-        response_text = response.text if response else "No response"
-        print(f"[NLU Slot-Fill]: ✗ Error: {e} | Response: {response_text}")
+        print(f"[NLU Context Update]: ✗ Error: {e}")
         return None
 
 def extract_news_topic(text: str) -> str:

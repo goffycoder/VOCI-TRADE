@@ -22,8 +22,49 @@ function VoiceTraderApp() {
   const toast = useToast();
   const recognitionRef = useRef(null);
 
+  // --- WEBSOCKET SETUP (LIVE UPDATES) ---
+  useEffect(() => {
+    // Connect to the Backend WebSocket
+    const ws = new WebSocket('ws://localhost:8000/ws');
 
-  // Initialize Audio
+    ws.onopen = () => {
+      console.log('[App]: Connected to Live Order Updates');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'ORDER_UPDATE') {
+          // 1. Play Notification Sound
+          playSfx('success2.mp3');
+
+          // 2. Show Toast based on Status
+          if (data.status === 'TRADED') {
+            toast.success(data.text);
+          } else if (data.status === 'REJECTED' || data.status === 'CANCELLED') {
+            toast.error(data.text);
+          } else {
+            toast.info(data.text);
+          }
+        }
+      } catch (err) {
+        console.error("WebSocket Message Error:", err);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket Error:", error);
+    };
+
+    // Cleanup on unmount
+    return () => {
+      ws.close();
+    };
+  }, [playSfx, toast]);
+
+
+  // --- INITIALIZATION & AUDIO ---
   useEffect(() => {
     // Start Ambient Music on first interaction
     const initAudio = () => {
@@ -54,28 +95,28 @@ function VoiceTraderApp() {
       recognitionRef.current = recognition;
     }
 
-    // Spacebar to toggle listening on/off
+    // Keyboard Shortcuts
     const handleKeyDown = (e) => {
+      // Spacebar to toggle listening
       if (e.code === 'Space' && !isHelpOpen) {
         e.preventDefault();
 
-        // If already listening, stop
         if (mode === 'LISTENING') {
           if (recognitionRef.current) {
             try {
               recognitionRef.current.stop();
               setMode('IDLE');
-              setBgmVolume(0.3); // Reset BGM volume
+              setBgmVolume(0.3);
             } catch (err) {
               console.error('Error stopping recognition:', err);
             }
           }
         } else {
-          // Otherwise, start listening
           interruptAndListen();
         }
       }
 
+      // Help Menu
       if (e.key === '?' && !isHelpOpen) {
         e.preventDefault();
         setIsHelpOpen(true);
@@ -112,7 +153,7 @@ function VoiceTraderApp() {
 
   const handleCommand = async (text) => {
     try {
-      setIsConnected(true); // Connection successful
+      setIsConnected(true);
       const payload = { message: text, context: serverContext };
       const response = await axios.post('http://localhost:8000/chat', payload);
       const data = response.data;
@@ -154,10 +195,12 @@ function VoiceTraderApp() {
         };
       }
 
-      // 3. ORDER LOGIC
+      // 3. ORDER LOGIC (Feedback for the command itself)
       else if (intent === 'ORDER_RESULT') {
         playSfx('confirm.mp3');
-        // Show toast notification
+
+        // Handle Toast for the API response (immediate feedback)
+        // Note: Real-time updates come via WebSocket later
         if (data.text.toLowerCase().includes('successfully') || data.text.toLowerCase().includes('placed')) {
           toast.success(data.text);
         } else if (data.text.toLowerCase().includes('rejected') || data.text.toLowerCase().includes('failed')) {
@@ -194,6 +237,15 @@ function VoiceTraderApp() {
         };
       }
 
+      // 7. CHAT LOGIC
+      else if (intent === 'CONVERSATIONAL' || data.data?.type === 'CHAT') {
+        playSfx('success2.mp3');
+        newItem = {
+          type: 'CHAT',
+          content: data.text
+        };
+      }
+
       // Add to History
       const isSystemMessage = data.text.toLowerCase().includes("system error") ||
         (data.data?.status === "WAITING_FOR_SLOT");
@@ -214,7 +266,7 @@ function VoiceTraderApp() {
 
     } catch (error) {
       setMode("IDLE");
-      setIsConnected(false); // Connection failed
+      setIsConnected(false);
       console.error(error);
     }
   };

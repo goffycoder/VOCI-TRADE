@@ -7,6 +7,7 @@ import TextCard from './cards/TextCard';
 import PortfolioCard from './cards/PortfolioCard';
 import PositionCard from './cards/PositionCard';
 import EmptyState from './EmptyState';
+import ChatCard from './cards/ChatCard';
 
 const HistoryFeed = ({ history, isLoading = false }) => {
     const canvasRef = useRef(null);
@@ -51,6 +52,7 @@ const HistoryFeed = ({ history, isLoading = false }) => {
                                 'NEWS': NewsCard,
                                 'HOLDINGS': PortfolioCard,
                                 'POSITIONS': PositionCard,
+                                'CHAT': ChatCard,
                                 'TEXT': TextCard
                             }[card.type] || TextCard;
 
@@ -60,6 +62,7 @@ const HistoryFeed = ({ history, isLoading = false }) => {
                                 'NEWS': { content: card.content },
                                 'HOLDINGS': { content: card.content },
                                 'POSITIONS': { content: card.content },
+                                'CHAT': { content: card.content },
                                 'TEXT': { content: card.content }
                             }[card.type] || { content: card.content };
 
