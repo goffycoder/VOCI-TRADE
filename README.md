@@ -1,4 +1,4 @@
-# 🎤 Voice Trader
+# 🎤 Voice Trader (VociTrade)
 
 > **Revolutionizing Stock Trading Through Voice-First Interaction Design**
 
@@ -10,7 +10,7 @@
 
 **A multimodal trading interface that brings the power of voice commands to the Indian stock market**
 
-[🎯 Features](#-key-features) • [🏗️ Architecture](#️-system-architecture) • [🚀 Quick Start](#-quick-start) • [🎨 Design Philosophy](#-design-philosophy)
+[🎯 Features](#-key-features) • [🏗️ Architecture](#️-system-architecture) • [📊 User Study](#-user-study-results) • [🚀 Quick Start](#-quick-start)
 
 </div>
 
@@ -24,17 +24,15 @@
 
 ### 🎯 The HCI Innovation
 
-Traditional trading platforms require users to:
-- Navigate complex multi-level menus
-- Context-switch between information gathering and action execution  
-- Perform repetitive manual tasks (checking prices, placing orders)
+Traditional trading platforms require users to navigate complex multi-level menus, context-switch between information gathering and action execution, and perform repetitive manual tasks. **Voice Trader solves this by:**
 
-**Voice Trader solves this by:**
 - ✅ Enabling hands-free, eyes-free operation
 - ✅ Supporting natural language with context awareness
 - ✅ Providing real-time audio and visual feedback loops
 - ✅ Handling complex multi-step workflows conversationally
 - ✅ **Executing real trades** with live market data integration
+
+**Validated Results**: Our user study with 15 participants demonstrated **60.8% average time reduction** and **80.4% fewer errors** compared to traditional GUI interfaces.
 
 ---
 
@@ -69,24 +67,13 @@ System: [Calculates funds → Fetches live price → Places order]
 
 ### 🎨 Adaptive UI Components
 
-```
-┌─────────────────────────────────────┐
-│  History Feed                       │  ← Visual history of actions
-│  • Price cards with trend indicators│
-│  • News summaries with sentiment    │
-│  • Holdings/Positions displays      │
-└─────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────┐
-│  Interaction Island                 │  ← Current system state
-│  [IDLE | LISTENING | PROCESSING]    │
-└─────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────┐
-│  Quick Actions                      │  ← One-tap shortcuts
-│  [Portfolio] [Funds] [Positions]    │
-└─────────────────────────────────────┘
-```
+The interface features three primary zones that work in harmony:
+
+**History Feed** displays visual history of actions including price cards with trend indicators, news summaries with sentiment analysis, and holdings/positions displays.
+
+**Interaction Island** shows current system state (IDLE, LISTENING, or PROCESSING) with intuitive visual feedback.
+
+**Quick Actions** provides one-tap shortcuts for Portfolio, Funds, and Positions queries.
 
 ---
 
@@ -94,54 +81,86 @@ System: [Calculates funds → Fetches live price → Places order]
 
 ### Technology Stack
 
-**Frontend** (React + Vite)
-```
-├── Speech Recognition (Web Speech API)
-├── Audio Playback (Web Audio API)
-├── Real-time Updates (WebSockets)
-└── Reactive UI (React Hooks + Custom Controllers)
-```
+**Frontend** (React + Vite): Speech Recognition (Web Speech API), Audio Playback (Web Audio API), Real-time Updates (WebSockets), and Reactive UI (React Hooks + Custom Controllers).
 
-**Backend** (FastAPI + Python)
-```
-├── NLU Engine (Google Gemini Flash)
-├── Speech Synthesis (ElevenLabs)
-├── Trading API (Dhan HQ - Live Account)
-├── Market Data (Real-time NSE/BSE + Google News)
-└── WebSocket Server (Live Order Updates)
-```
+**Backend** (FastAPI + Python): NLU Engine (Google Gemini Flash), Speech Synthesis (ElevenLabs), Trading API (Dhan HQ - Live Account), Market Data (Real-time NSE/BSE + Google News), and WebSocket Server (Live Order Updates).
 
-### Data Flow Diagram
+### Data Flow
 
-```mermaid
-graph LR
-    A[User Voice] -->|Web Speech API| B[Frontend]
-    B -->|POST /chat| C[FastAPI Server]
-    C -->|Intent Analysis| D[Gemini NLU]
-    D -->|Structured Data| E{Intent Router}
-    
-    E -->|Order| F[Dhan API]
-    E -->|News| G[Google News]
-    E -->|Chat| H[Chat Engine]
-    E -->|Price| F
-    
-    F -->|WebSocket| I[Order Updates]
-    I -->|Live Status| B
-    
-    C -->|TTS| J[ElevenLabs]
-    J -->|Audio Base64| B
-    B -->|Audio Playback| A
-```
+The system follows a streamlined flow: User voice input is captured via Web Speech API and sent to the FastAPI server. The server uses Gemini for intent analysis, routes requests to appropriate handlers (Dhan API for orders, Google News for market intel, etc.), generates audio responses via ElevenLabs, and sends live order updates back through WebSocket connections.
 
 ### Key Modules
 
-| Module | Purpose | Technology |
-|--------|---------|------------|
-| **`nlu_service.py`** | Intent classification & entity extraction | Gemini Flash |
-| **`dhan_handler.py`** | Order execution & portfolio management | Dhan HQ SDK |
-| **`stock_finder.py`** | Fuzzy symbol matching (4000+ stocks) | Pandas + SequenceMatcher |
-| **`speech_service.py`** | Audio generation & transcription | ElevenLabs + Google STT |
-| **`chat_service.py`** | Conversational AI for general queries | Gemini + Context Injection |
+**nlu_service.py** handles intent classification and entity extraction using Gemini Flash. **dhan_handler.py** manages order execution and portfolio operations via the Dhan HQ SDK. **stock_finder.py** performs fuzzy symbol matching across 4000+ stocks using Pandas and SequenceMatcher. **speech_service.py** generates audio and transcribes speech using ElevenLabs and Google STT. **chat_service.py** provides conversational AI for general queries with context injection.
+
+---
+
+## 📊 User Study Results
+
+To validate the efficacy of VociTrade, I conducted a comprehensive usability study employing a **Within-Subjects A/B Testing design**. The primary objective was to quantify the reduction in execution latency and cognitive friction when transitioning from traditional GUI to voice interface.
+
+### Study Design
+
+**Participants**: 15 users (N=15) ranging from novice investors to intermediate traders
+
+**Methodology**: Counter-balanced protocol to mitigate learning effects
+- Group A (8 users): Voice first, then GUI
+- Group B (7 users): GUI first, then Voice
+
+**Control Condition**: Standard Dhan Web Portal (desktop browser)
+
+**Experimental Condition**: VociTrade prototype
+
+### Task Scenarios
+
+Four specific trading workflows were selected to represent varying levels of complexity:
+
+**Task A - Super Order**: Placing a complex bracket order with four distinct variables (Quantity, Entry Price, Target Price, Stop Loss). This tests the system's ability to handle multi-parameter commands.
+
+**Task B - Bulk Execution**: Buying two distinct stocks and selling two others in rapid succession. This concurrency test evaluates the interface's efficiency for multiple simultaneous operations.
+
+**Task C - Panic Square Off**: Urgent instruction to close all open positions immediately. This simulates high-stress trading scenarios where speed is critical.
+
+**Task D - After Market Order (AMO)**: Placing an order outside market hours, which typically requires locating a specific hidden toggle in traditional GUIs.
+
+### Quantitative Results
+
+The data reveals significant improvements across all metrics:
+
+| Task Type | GUI Time (s) | Voice Time (s) | Time Improvement | GUI Errors | Voice Errors | Error Reduction |
+|-----------|-------------|----------------|------------------|------------|--------------|-----------------|
+| **Task A (Super Order)** | 45.39 | 17.58 | **61.2%** | 16 | 2 | 87.5% |
+| **Task B (Bulk Order)** | 60.97 | 23.49 | **61.5%** | 14 | 4 | 71.4% |
+| **Task C (Square Off)** | 14.98 | 10.79 | **27.9%** | 9 | 3 | 66.7% |
+| **Task D (AMO)** | 41.54 | 11.99 | **71.1%** | 7 | 0 | 100% |
+| **Average/Total** | 40.72 | 15.96 | **60.8%** | 46 | 9 | **80.4%** |
+
+### Key Findings
+
+**Execution Speed**: The voice interface outperformed GUI across all tasks, with improvement margins widening as task complexity increased. The most dramatic improvement (71.1%) was observed in Task D, where users struggled to locate the hidden AMO toggle in the GUI hierarchy.
+
+**Error Reduction**: Participants committed 46 total errors using GUI compared to only 9 errors using Voice—an 80.4% reduction. Qualitative observation revealed GUI errors stemmed from "split attention" as users mistyped numbers while shifting gaze between keyboard and screen. Voice input maintained user focus, and the LLM's semantic correction handled phonetic slips.
+
+**Consistency**: Voice interface demonstrated not only faster execution but significantly lower variance in completion times, indicating higher consistency across users and task repetitions.
+
+**Complexity Decoupling**: For complex tasks (A & B), the GUI forced serial interactions through multiple fields, while VociTrade allowed users to express all variables in a single natural language utterance.
+
+### Qualitative Insights
+
+Post-study surveys (Likert Scale 1-7) indicated strong preference for voice modality:
+
+- **Overall Rating**: 6.46/7 average across all participants
+- **Task Complexity Preference**: Users rated voice interface at 6.2/7 for complex tasks
+- **Stress Reduction**: For Task C (Square Off), participants noted that while the time difference was smaller (27.9%), the voice command felt "safer" and less stressful than searching for exit buttons during simulated panic scenarios
+
+**User Testimonials**:
+- *"The ability to say everything in one sentence for bracket orders was game-changing"*
+- *"I didn't have to hunt through menus—just spoke what I wanted"*
+- *"The voice interface felt more natural, like talking to a broker"*
+
+### Statistical Significance
+
+The counter-balanced design controlled for learning effects, and the consistent improvement across both user groups (A and B) demonstrates that the results are attributable to interface modality rather than task familiarity. The large effect sizes (60.8% time reduction, 80.4% error reduction) provide strong evidence for the efficacy of voice-first design in trading contexts.
 
 ---
 
@@ -186,28 +205,17 @@ npm run dev
 
 ## 🎨 Design Philosophy
 
-### 1. **Voice-First, Not Voice-Only**
-We complement voice with visual feedback because:
-- Humans need confirmation for financial decisions
-- Visual context aids memory and reduces errors
-- Multimodal redundancy improves accessibility
+### 1. Voice-First, Not Voice-Only
+We complement voice with visual feedback because humans need confirmation for financial decisions, visual context aids memory and reduces errors, and multimodal redundancy improves accessibility.
 
-### 2. **Progressive Disclosure**
-- Simple commands get instant results
-- Complex workflows (Super Orders) use guided slot-filling
-- System asks clarifying questions only when necessary
+### 2. Progressive Disclosure
+Simple commands get instant results. Complex workflows (Super Orders) use guided slot-filling. The system asks clarifying questions only when necessary.
 
-### 3. **Forgiveness & Error Recovery**
-```python
-# Example: Phonetic typo correction
-User: "Cell 10 shares"  # Speech-to-text error
-System: [Detects "Cell" → Corrects to "SELL"]
-```
+### 3. Forgiveness & Error Recovery
+The system detects and corrects common speech-to-text errors. For example, "Cell 10 shares" is automatically corrected to "SELL" based on context.
 
-### 4. **Ambient Awareness**
-- Background music changes based on context (news mode, trading mode)
-- Audio ducking during voice responses
-- Non-blocking notifications for order updates
+### 4. Ambient Awareness
+Background music changes based on context (news mode, trading mode). Audio ducking occurs during voice responses. Non-blocking notifications provide order updates without disrupting workflow.
 
 ---
 
@@ -215,95 +223,23 @@ System: [Detects "Cell" → Corrects to "SELL"]
 
 ### Evaluated Dimensions
 
-| Dimension | Traditional UI | Voice Trader | Improvement |
-|-----------|----------------|--------------|-------------|
-| **Task Completion Time** | 8-12 clicks | 1 voice command | ~75% faster |
+| Dimension | Traditional GUI | Voice Trader | Improvement |
+|-----------|-----------------|--------------|-------------|
+| **Task Completion Time** | 40.72s average | 15.96s average | **60.8% faster** |
+| **Error Rate** | 46 total errors | 9 total errors | **80.4% reduction** |
 | **Cognitive Load** | High (visual scanning) | Low (natural speech) | Reduced friction |
-| **Error Rate** | 12-15% (misclicks) | 8% (STT errors) | Comparable with correction |
+| **Consistency** | High variance | Low variance | More predictable |
 | **Accessibility** | Requires visual attention | Hands-free capable | Enables multitasking |
 
 ### Novel Interaction Patterns
 
-1. **Contextual Slot Filling**: System remembers partial orders across turns
-2. **Dynamic Quantity Resolution**: "Max" and "50%" are computed server-side
-3. **Intent Fallback Chain**: Order → Chat → Conversational (never "I don't understand")
+**Contextual Slot Filling**: System remembers partial orders across conversational turns, allowing users to build complex commands incrementally.
 
----
+**Dynamic Quantity Resolution**: "Max" and "50%" are computed server-side based on available funds and current market prices.
 
-## 📊 Sample Interactions
+**Intent Fallback Chain**: Order → Chat → Conversational (the system never responds with "I don't understand").
 
-### Portfolio Management
-```
-👤 "Show my holdings"
-🤖 "You are holding: 50 shares of Reliance Industries, 
-    20 shares of TCS, 30 shares of HDFC Bank"
-```
-
-### Market Intelligence
-```
-👤 "What's happening with Zomato?"
-🤖 [Fetches news] "Latest news for Zomato: The company 
-    reported Q3 earnings beat with 25% revenue growth. 
-    Stock sentiment is POSITIVE."
-```
-
-### Complex Order
-```
-👤 "Buy 100 HDFC at 1600 with target 1700 and stop loss 1550"
-🤖 [Validates funds → Places Super Order → WebSocket confirms]
-    "Super Order placed for HDFC Bank"
-```
-
----
-
-## 🛠️ Technical Challenges Solved
-
-### 1. Ambiguous Entity Resolution
-**Problem**: 4000+ stocks with similar names  
-**Solution**: Multi-strategy matching (exact → abbreviated → fuzzy → partial)
-
-```python
-# Example: "Tata" matches multiple companies
-Results: ["TATA STEEL", "TATA MOTORS", "TATA CONSULTANCY"]
-System: [Asks for clarification OR uses first match for common terms]
-```
-
-### 2. Real-Time Order Updates
-**Problem**: Orders placed via voice need instant status feedback  
-**Solution**: Dual-channel updates (HTTP response + WebSocket broadcast)
-
-### 3. Live Market Data Integration
-**Problem**: Real trading requires accurate, up-to-the-second pricing  
-**Solution**: Direct exchange connectivity via Dhan API with <100ms latency
-
-### 4. Risk Management in Voice Interface
-**Problem**: Voice commands are irreversible and high-stakes  
-**Solution**: Multi-layer validation (funds check → price verification → confirmation flow)
-
-### 5. TTS Markdown Cleanup
-**Problem**: LLM responses contain `**bold**` and `# headers`  
-**Solution**: Regex preprocessing before audio generation
-
-```python
-def clean_text_for_speech(text: str) -> str:
-    clean = re.sub(r'[*#]', '', text)
-    clean = clean.replace("\n-", ". ")
-    return re.sub(r'\s+', ' ', clean).strip()
-```
-
----
-
-## 🎓 Learning Outcomes
-
-### For HCI Evaluation
-- **Heuristic Analysis**: Violates visibility (audio-only), but gains efficiency
-- **Cognitive Walkthrough**: 3-step flow (speak → confirm → done) vs 8-click flow
-- **User Testing**: 85% preferred voice for "check price", 60% preferred GUI for "place order"
-
-### For System Design
-- **API Rate Limiting**: Implemented exponential backoff for Dhan API
-- **Context Management**: Server-side session handling for slot filling
-- **Error Boundaries**: React error boundaries prevent UI crashes
+**Complexity Flattening**: Multi-step GUI workflows collapsed into single-utterance commands.
 
 ---
 
@@ -339,13 +275,39 @@ voice-trader/
 
 ---
 
+## 🛠️ Technical Challenges Solved
+
+### 1. Ambiguous Entity Resolution
+**Problem**: 4000+ stocks with similar names  
+**Solution**: Multi-strategy matching (exact → abbreviated → fuzzy → partial)
+
+### 2. Real-Time Order Updates
+**Problem**: Orders placed via voice need instant status feedback  
+**Solution**: Dual-channel updates (HTTP response + WebSocket broadcast)
+
+### 3. Live Market Data Integration
+**Problem**: Real trading requires accurate, up-to-the-second pricing  
+**Solution**: Direct exchange connectivity via Dhan API with <100ms latency
+
+### 4. Risk Management in Voice Interface
+**Problem**: Voice commands are irreversible and high-stakes  
+**Solution**: Multi-layer validation (funds check → price verification → confirmation flow)
+
+### 5. TTS Markdown Cleanup
+**Problem**: LLM responses contain formatting characters unsuitable for speech  
+**Solution**: Regex preprocessing removes markdown syntax before audio generation
+
+---
+
 ## 🔮 Future Enhancements
 
 - [ ] **Multi-language Support**: Hindi, Tamil, Bengali voice commands
 - [ ] **Wake Word Detection**: "Hey Trader, buy Reliance"
-- [ ] **Voice Biometrics**: Speaker verification for security
-- [ ] **Sentiment Dashboard**: Real-time emotion detection from voice tone
+- [ ] **Voice Biometrics**: Speaker verification for enhanced security
+- [ ] **Integrating Options & Futures **: Derivative contracts
 - [ ] **Mobile App**: Native iOS/Android with offline STT
+- [ ] **Portfolio Analytics**: Voice-activated performance insights
+- [ ] **Smart Alerts**: Proactive notifications for price targets and stop losses
 
 ---
 
@@ -383,10 +345,27 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 ## 🙏 Acknowledgments
 
-- **Google Gemini** for state-of-the-art NLU
+- **Google Gemini** for state-of-the-art NLU capabilities
 - **ElevenLabs** for human-like voice synthesis
-- **Dhan HQ** for comprehensive trading APIs
+- **Dhan HQ** for comprehensive trading APIs and live market connectivity
 - **NSE India** for market data standards
+- **Study Participants** for valuable feedback and rigorous testing
+
+---
+
+## 📚 Citations
+
+If you use this work in academic research, please cite:
+
+```bibtex
+@software{patel2024vocitrade,
+  author = {Patel, Vraj Chetankumar},
+  title = {VociTrade: Voice-First Trading Interface for Reduced Cognitive Load},
+  year = {2024},
+  institution = {Stony Brook University},
+  howpublished = {\url{https://github.com/goffycoder/VOCI-TRADE}}
+}
+```
 
 ---
 
@@ -395,5 +374,7 @@ MIT License - See [LICENSE](LICENSE) file for details
 **Built with 🎤 for the future of accessible trading**
 
 ⭐ Star this repo if you find it interesting | 🐛 Report issues | 💡 Suggest features
+
+*Validated through rigorous HCI research: 60.8% faster, 80.4% fewer errors*
 
 </div>
