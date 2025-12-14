@@ -341,33 +341,30 @@ class DhanHandler:
         except Exception as e:
             return f"Error squaring off: {e}"
 
-    # --- RESPONSE PARSER ---
+    # --- UPDATED RESPONSE PARSER (Clean & Concise) ---
     def _parse_dhan_response(self, response: dict, details: dict, is_amo: bool, is_super: bool) -> str:
+        """
+        Parses Dhan API response into a SHORT, punchy sentence.
+        """
         status = response.get("status", "").lower()
         order_status = response.get("data", {}).get("orderStatus", "") if "data" in response else response.get("orderStatus", "")
         
-        # Get stock name for clean output
-        sym = details.get("symbol_name", details.get("symbol", "the stock"))
+        # Get stock name in Title Case (e.g., "Reliance Industries")
+        sym = details.get("symbol_name", details.get("symbol", "Stock")).title()
 
         if status == "success" or order_status in ["PENDING", "TRANSIT", "TRADED", "OPN", "CONFIRMED"]:
             if is_super:
-                return f"Super Order for {sym} placed successfully."
+                return f"Super Order placed for {sym}"
             elif is_amo:
-                return f"Market is closed. Order for {sym} placed as an After Market Order."
+                return f"AMO placed for {sym}"
             else:
-                return f"Order for {sym} executed successfully."
+                return f"Order placed for {sym}"
         
         elif status == "failure" or order_status == "REJECTED":
-            # Extract error message
+            # Extract just the core error reason
             remarks = response.get("remarks", {})
-            error_msg = "Unknown reason"
-            
-            if isinstance(remarks, dict):
-                error_msg = remarks.get("error_message", "Unknown reason")
-            elif isinstance(remarks, str):
-                error_msg = remarks
-            
-            return f"The order was rejected by the broker. Reason: {error_msg}"
+            error_msg = remarks.get("error_message", "Unknown reason") if isinstance(remarks, dict) else str(remarks)
+            return f"Failed for {sym}" 
         
         else:
-            return "Order received, but I couldn't verify the final status."
+            return f"Status unknown for {sym}"

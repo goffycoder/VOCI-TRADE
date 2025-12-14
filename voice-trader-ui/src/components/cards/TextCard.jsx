@@ -3,7 +3,9 @@ import BaseCard from './BaseCard';
 const TextCard = ({ content }) => {
     return (
         <BaseCard>
-            <div style={{ fontSize: '1.1rem', color: '#444' }}>{content}</div>
+            <div className="text-gray-200 text-lg leading-relaxed whitespace-pre-wrap">
+                {content}
+            </div>
         </BaseCard>
     );
 };
